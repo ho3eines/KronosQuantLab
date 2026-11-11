@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from app.core.config import CLOSE_INDEX
+from app.core.errors import ForecastError
 from app.core.runs import utc_now
 from app.evaluation.metrics import path_quantiles
 from app.forecast.base import Forecaster, make_window
@@ -42,6 +43,8 @@ def make_forecast(
     base_seed: int = 20260101, origin: int | None = None,
 ) -> Forecast:
     """Forecast the ``horizon`` bars after row ``origin - 1`` (default: after the last row)."""
+    if n_paths < 2:
+        raise ForecastError("n_paths must be at least 2: quantiles cannot be computed from one path")
     origin = len(df) if origin is None else origin
     lookback = min(lookback, origin)
     win = make_window(df, origin, lookback, horizon)
@@ -61,7 +64,7 @@ def save_forecast(conn: sqlite3.Connection, symbol: str, fc: Forecast) -> int:
             (utc_now().isoformat(timespec="seconds"), symbol, fc.model, fc.origin_ts.isoformat(), fc.last_close,
              fc.horizon, int(fc.paths.shape[0]), fc.seed, fc.lookback),
         )
-        run_id = int(cur.lastrowid)
+        run_id = int(cur.lastrowid or 0)
         conn.executemany(
             "INSERT INTO forecast_quantiles VALUES (?,?,?,?,?,?)",
             [(run_id, i + 1, str(fc.future_ts.iloc[i]), float(fc.p10[i]), float(fc.p50[i]), float(fc.p90[i]))

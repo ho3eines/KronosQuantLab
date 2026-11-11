@@ -12,6 +12,7 @@ Daily cycle (``step``), safe to run any number of times per day:
 from __future__ import annotations
 
 import logging
+import math
 import sqlite3
 from typing import Any
 
@@ -33,7 +34,7 @@ class PaperError(KQLError):
 
 
 def init_account(conn: sqlite3.Connection, initial_cash: float = 10_000.0) -> None:
-    if initial_cash <= 0:
+    if not (math.isfinite(initial_cash) and initial_cash > 0):
         raise PaperError("initial cash must be positive")
     if conn.execute("SELECT 1 FROM paper_account").fetchone():
         raise PaperError("paper account already exists; it is never reset implicitly")

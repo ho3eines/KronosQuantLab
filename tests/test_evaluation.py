@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from app.core.config import CLOSE_INDEX
@@ -53,7 +52,7 @@ def test_origins_are_chronological_and_fit(ohlcv):
 def test_model_only_sees_the_past_and_same_seeds_for_every_model(ohlcv):
     a, b = FakeForecaster(), FakeForecaster()
     ra, rb = run_forecasts(ohlcv, a, CFG), run_forecasts(ohlcv, b, CFG)
-    for call, origin in zip(a.calls, ra["origins"]):
+    for call, origin in zip(a.calls, ra["origins"], strict=True):
         assert call["last_ts"] == ohlcv["timestamp"].iloc[origin - 1]
         assert call["n_context"] == 100 and call["n_paths"] == 6
     assert [c["seed"] for c in a.calls] == [c["seed"] for c in b.calls]

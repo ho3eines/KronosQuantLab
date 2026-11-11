@@ -115,7 +115,7 @@ class KronosForecaster:
         device: str = "cpu",
         src_dir: Path = KRONOS_SRC_DIR,
         **kwargs: Any,
-    ) -> "KronosForecaster":
+    ) -> KronosForecaster:
         """Load from local directories only; never touches the network."""
         for d in (model_dir, tokenizer_dir):
             if not (d / "config.json").is_file():
@@ -144,6 +144,8 @@ class KronosForecaster:
         x_df = context[list(FEATURE_COLUMNS)].reset_index(drop=True)
         x_ts = pd.to_datetime(context["timestamp"], utc=True).dt.tz_localize(None).reset_index(drop=True)
         y_ts = pd.Series(pd.to_datetime(future_ts)).reset_index(drop=True)
+        if y_ts.dt.tz is not None:  # Kronos only reads calendar fields; compare like with like
+            y_ts = y_ts.dt.tz_convert("UTC").dt.tz_localize(None)
         if not x_ts.is_monotonic_increasing or x_ts.iloc[-1] >= y_ts.iloc[0]:
             raise ForecastError("timestamps must be increasing and the future must follow the context")
         if len(x_df) > self.max_context:

@@ -41,6 +41,8 @@ class BinanceProvider:
 
 def synthetic_candles(n: int = 900, seed: int = 7, end: str | None = None) -> pd.DataFrame:
     """Seeded geometric random walk. For demos and tests only - NOT market data."""
+    if n < 2:
+        raise DataValidationError("synthetic series needs at least 2 rows")
     rng = np.random.default_rng(seed)
     close = 100.0 * np.exp(np.cumsum(rng.normal(0.0003, 0.025, n)))
     open_ = np.concatenate([[100.0], close[:-1]])
@@ -77,6 +79,7 @@ def store_candles(
 ) -> dict[str, Any]:
     """Validate and insert. Stored candles are immutable: a differing re-download is
     reported as a conflict and the stored row is kept. Invalid input stores nothing."""
+    now = now or dt.datetime.now(dt.UTC)  # always drop candles that have not closed yet
     clean, report = validate_ohlcv(df, now=now)
     require_ok(report)
     prev = last_timestamp(conn, symbol)
@@ -95,7 +98,7 @@ def store_candles(
             for c in COLS:
                 conflicts += int((~np.isclose(both[c], both[f"{c}_db"], rtol=1e-9, atol=0)).sum())
     rows = [(symbol, config.INTERVAL, t.isoformat(), *map(float, vals), source)
-            for t, vals in zip(new["timestamp"], new[COLS].to_numpy())]
+            for t, vals in zip(new["timestamp"], new[COLS].to_numpy(), strict=True)]
     with conn:
         conn.executemany("INSERT INTO candles VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
         result = {"symbol": symbol, "source": source, "inserted": len(rows), "conflicting_values": conflicts,
@@ -111,7 +114,7 @@ def update_symbol(
     conn: sqlite3.Connection, provider: MarketDataProvider, symbol: str, now: dt.datetime | None = None
 ) -> dict[str, Any]:
     """Incremental update: fetch from the last stored candle (inclusive, as a consistency check)."""
-    now = now or dt.datetime.now(dt.timezone.utc)
+    now = now or dt.datetime.now(dt.UTC)
     prev = last_timestamp(conn, symbol)
     start_ms = 0 if prev is None else int(prev.timestamp() * 1000)
     return store_candles(conn, symbol, provider.fetch(symbol, start_ms), provider.name, now=now)

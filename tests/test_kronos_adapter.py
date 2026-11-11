@@ -125,3 +125,11 @@ def test_real_checkpoint_smoke(key, ohlcv):
     win = make_window(ohlcv, len(ohlcv), 400, 7)
     out = fc.sample_paths(win.context, win.future_ts, 1, seed=1)
     assert out.shape == (1, 7, 6) and np.isfinite(out).all()
+
+
+@needs_kronos
+def test_timezone_aware_future_timestamps_are_accepted(tiny, ohlcv):
+    win = make_window(ohlcv, 300, 64, 7)
+    aware = win.future_ts.dt.tz_localize("UTC")  # used to raise an uncaught TypeError
+    np.testing.assert_array_equal(tiny.sample_paths(win.context, aware, 2, seed=3),
+                                  tiny.sample_paths(win.context, win.future_ts, 2, seed=3))

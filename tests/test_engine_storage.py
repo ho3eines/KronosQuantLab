@@ -46,10 +46,10 @@ def test_incremental_update_only_adds_new_complete_candles(conn, ohlcv):
     now = (ohlcv["timestamp"].iloc[299] + pd.Timedelta(hours=3)).to_pydatetime()  # candle 299 still open
     first = engine.update_symbol(conn, StubProvider(ohlcv.iloc[:300]), "X", now=now)
     assert first["inserted"] == 299 and first["incomplete_dropped"] == 1
-    second = engine.update_symbol(conn, provider, "X", now=dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+    second = engine.update_symbol(conn, provider, "X", now=dt.datetime(2030, 1, 1, tzinfo=dt.UTC))
     assert second["inserted"] == len(ohlcv) - 299 and second["conflicting_values"] == 0
     assert provider.calls[0] == int(ohlcv["timestamp"].iloc[298].timestamp() * 1000)  # resumes at last stored bar
-    third = engine.update_symbol(conn, provider, "X", now=dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+    third = engine.update_symbol(conn, provider, "X", now=dt.datetime(2030, 1, 1, tzinfo=dt.UTC))
     assert third["inserted"] == 0 and len(engine.load_candles(conn, "X")) == len(ohlcv)
 
 

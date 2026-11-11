@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 
 from app.core.config import CLOSE_INDEX
+from app.core.errors import require
 from app.evaluation import metrics
 
 MIN_WIDTH = 1e-12
@@ -53,10 +54,12 @@ def calibrate_split(
 
     Uses the forecast at step h (endpoint) for each horizon h.
     """
+    require(0 < level < 1, f"level must be strictly between 0 and 1, got {level}")
+    require(0 < calib_fraction < 1, f"calib_fraction must be strictly between 0 and 1, got {calib_fraction}")
     n = paths.shape[0]
     n_cal = int(round(n * calib_fraction))
     out: list[dict[str, Any]] = []
-    if paths.shape[1] < 2:
+    if n == 0 or paths.shape[1] < 2:
         return out
     close = paths[..., CLOSE_INDEX]
     p10, p50, p90 = metrics.path_quantiles(np.moveaxis(close, 1, 0))  # each (origins, H)

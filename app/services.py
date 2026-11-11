@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.backtest.engine import BacktestConfig, BacktestResult, config_dict, run_backtest
+from app.backtest.engine import BacktestConfig, BacktestResult, config_dict, decision_indices, run_backtest
 from app.core import config
 from app.core.runs import new_run_dir, utc_now, write_json_new
 from app.data import engine
@@ -20,6 +20,7 @@ from app.evaluation.rolling import EvalConfig, run_forecasts, summarize
 from app.forecast.registry import CachedForecaster, build_forecaster
 from app.forecast.service import Forecast, make_forecast, save_forecast
 from app.paper import simulator
+from app.signals.regime import RegimeParams
 from app.signals.rules import SignalParams
 from app.storage.db import connect
 
@@ -48,6 +49,11 @@ def calibrate(conn: sqlite3.Connection, symbol: str, model: str, cfg: EvalConfig
     df = engine.load_candles(conn, symbol)
     res = run_forecasts(df, get_forecaster(model, device), cfg)
     rows = calibrate_split(res["paths"], res["actual"], cfg.horizons, calib_fraction, level)
+    for row in rows:  # last bar whose realised value went into the factor (for look-ahead checks)
+        last_origin = res["origins"][row["n_calibration"] - 1] if row["n_calibration"] else None
+        row["fit_end_timestamp"] = (
+            str(df["timestamp"].iloc[last_origin + row["horizon"] - 1]) if last_origin is not None else None
+        )
     out = {
         "kind": "calibration", "created_utc": utc_now().isoformat(), "symbol": symbol, "model": model,
         "config": dataclasses.asdict(cfg), "calib_fraction": calib_fraction, "level": level,
@@ -81,22 +87,49 @@ def backtest_runs() -> list[dict[str, Any]]:
     return _load_runs("backtest")
 
 
-def active_interval_factor(symbol: str, model: str, horizon: int) -> tuple[float, str]:
-    """Newest usable calibration factor for (symbol, model, horizon); 1.0 (raw band) if none."""
+def active_interval_factor(
+    symbol: str, model: str, horizon: int, before: pd.Timestamp | None = None
+) -> tuple[float, str]:
+    """Newest usable calibration factor for (symbol, model, horizon); 1.0 (raw band) if none.
+
+    ``before``: first decision time of the period the factor will be applied to. A factor
+    fitted on data at or after that time would leak the future into a backtest, so it is
+    skipped. Runs that do not record their fit end are treated the same way.
+    """
+    skipped = 0
     for run in calibration_runs():
-        if run["symbol"] == symbol and run["model"] == model:
-            for row in run["calibration"]:
-                if row["horizon"] == horizon and row["factor"] is not None:
-                    return float(row["factor"]), f"calibration run {Path(run['run_dir']).name}"
+        if run["symbol"] != symbol or run["model"] != model:
+            continue
+        for row in run["calibration"]:
+            if row["horizon"] != horizon or row["factor"] is None:
+                continue
+            if before is not None:
+                fit_end = row.get("fit_end_timestamp")
+                if fit_end is None or pd.Timestamp(fit_end) >= pd.Timestamp(before):
+                    skipped += 1
+                    continue
+            return float(row["factor"]), f"calibration run {Path(run['run_dir']).name}"
+    if skipped:
+        return 1.0, (f"raw, uncalibrated band: {skipped} calibration(s) exist but were fitted on data inside "
+                     "the backtest period and would leak the future")
     return 1.0, "no calibration available: raw, uncalibrated P10-P90 band"
 
 
-def signal_params(symbol: str, model: str, **overrides: Any) -> tuple[SignalParams, str]:
+def signal_params(
+    symbol: str, model: str, before: pd.Timestamp | None = None, **overrides: Any
+) -> tuple[SignalParams, str]:
     params = SignalParams(**overrides)
     if "interval_factor" in overrides:
         return params, "interval factor set manually"
-    factor, source = active_interval_factor(symbol, model, params.horizon)
+    factor, source = active_interval_factor(symbol, model, params.horizon, before)
     return dataclasses.replace(params, interval_factor=factor), source
+
+
+def backtest_start(conn: sqlite3.Connection, symbol: str, cfg: BacktestConfig) -> pd.Timestamp:
+    """Timestamp of the first decision bar a backtest with ``cfg`` would use."""
+    df = engine.load_candles(conn, symbol)
+    first = decision_indices(len(df), cfg, max(RegimeParams().min_bars, 30))[0]
+    return pd.Timestamp(df["timestamp"].iloc[first])
 
 
 def backtest(conn: sqlite3.Connection, symbol: str, model: str, params: SignalParams, cfg: BacktestConfig,
@@ -126,6 +159,10 @@ def paper_step(conn: sqlite3.Connection, symbol: str, model: str, n_paths: int =
     params, source = signal_params(symbol, model)
     out = simulator.step(conn, symbol, df, get_forecaster(model, device), params, lookback, n_paths)
     out["interval_factor_source"] = source
+    age_days = (pd.Timestamp.now(tz="UTC").floor("D") - pd.Timestamp(df["timestamp"].iloc[-1])).days
+    if age_days > 1:
+        out["warning"] = (f"newest stored candle is {age_days} days old; the decision above is for that old "
+                          "candle. Run 'data update' first.")
     return out
 
 

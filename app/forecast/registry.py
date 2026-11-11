@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from app.core import config
-from app.core.errors import ModelUnavailableError
+from app.core.errors import ForecastError, ModelUnavailableError
 from app.forecast.base import Forecaster, check_paths
 from app.forecast.baselines import BootstrapForecaster
 
@@ -72,8 +72,13 @@ class CachedForecaster:
     def sample_paths(self, context: pd.DataFrame, future_ts: pd.Series, n_paths: int, seed: int) -> np.ndarray:
         path = self.cache_dir / self.name / f"{self._key(context, future_ts, n_paths, seed)}.npy"
         if path.is_file():
-            self.hits += 1
-            return check_paths(np.load(path), n_paths, len(future_ts))
+            try:
+                cached = check_paths(np.load(path), n_paths, len(future_ts))
+            except (OSError, ValueError, EOFError, ForecastError) as exc:  # truncated or foreign file
+                log.warning("ignoring unusable cache entry %s: %s", path.name, exc)
+            else:
+                self.hits += 1
+                return cached
         self.misses += 1
         out = self.inner.sample_paths(context, future_ts, n_paths, seed)
         path.parent.mkdir(parents=True, exist_ok=True)

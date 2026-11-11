@@ -158,7 +158,7 @@ def torch_info() -> dict[str, Any]:
 
 def collect() -> dict[str, Any]:
     return {
-        "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "generated_at_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "repo_root": str(REPO_ROOT),
         "os": os_info(),
         "python": python_info(),
@@ -170,9 +170,12 @@ def collect() -> dict[str, Any]:
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):  # non-ASCII paths must not crash a cp1252 console
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     report = collect()
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     path = REPORT_DIR / f"p0_env_{stamp}.json"
     with path.open("x", encoding="utf-8") as fh:  # "x": refuse to overwrite
         json.dump(report, fh, indent=2, ensure_ascii=False)

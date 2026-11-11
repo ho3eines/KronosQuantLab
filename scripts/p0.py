@@ -29,7 +29,9 @@ import pandas as pd  # noqa: E402
 
 from app.core import config  # noqa: E402
 from app.core.errors import KQLError  # noqa: E402
-from app.core.runs import latest_run_dir, new_run_dir, utc_now, write_json_new, write_text_new  # noqa: E402
+from app.core.runs import (  # noqa: E402
+    dumps, latest_run_dir, new_run_dir, safe_console, utc_now, write_json_new, write_text_new,
+)
 
 log = logging.getLogger("p0")
 
@@ -105,7 +107,7 @@ def cmd_data(args: argparse.Namespace) -> int:
     clean_path = config.DATASETS_DIR / "clean" / f"{args.symbol}_1d_{stamp}.csv"
     write_text_new(clean_path, clean.to_csv(index=False))
     write_json_new(clean_path.with_suffix(".validation.json"), report)
-    print(json.dumps(report, indent=2))
+    print(dumps(report))
     print(f"\nraw:   {raw_path}\nclean: {clean_path}")
     if not report["ok"]:
         print("\nVALIDATION FAILED - data was saved but benchmark/evaluate will refuse to use it.")
@@ -177,7 +179,7 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
                                     "axes": ["path", "step", "feature"], "features": list(config.FEATURE_COLUMNS),
                                     "first_step_timestamp": str(win.future_ts.iloc[0])}
         out["models"][key] = result
-        print(json.dumps(result, indent=2, default=str))
+        print(dumps(result))
     write_json_new(run_dir / "benchmark.json", out)
     print(f"\nSaved: {run_dir}")
     return 0 if all(r["status"] == "ok" for r in out["models"].values()) else 1
@@ -258,7 +260,8 @@ def cmd_report(args: argparse.Namespace) -> int:
     evaluation = json.loads((eval_dir / "evaluation.json").read_text(encoding="utf-8")) if eval_dir else None
     rows: list[dict[str, Any]] = []
     if eval_dir and (eval_dir / "metrics.csv").is_file():
-        rows = pd.read_csv(eval_dir / "metrics.csv").astype(object).where(lambda d: d.notna(), None).to_dict("records")
+        frame = pd.read_csv(eval_dir / "metrics.csv").astype(object)
+        rows = [{str(k): v for k, v in r.items()} for r in frame.where(frame.notna(), None).to_dict("records")]
     env = (bench or evaluation or {}).get("env") or _env_summary()
     if bench_dir:
         env["benchmark run"] = bench_dir.name
@@ -273,6 +276,13 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 # ----------------------------------------------------------------------------- parser
+def positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {text}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -284,8 +294,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--models", nargs="+", choices=list(config.MODELS), default=list(config.MODELS))
         sp.add_argument("--device", choices=["cpu", "auto"], default="cpu",
                         help="'auto' uses CUDA only if a real self-test passes")
-        sp.add_argument("--lookback", type=int, default=400)
-        sp.add_argument("--batch-size", type=int, default=None, help="split sample paths into smaller batches")
+        sp.add_argument("--lookback", type=positive_int, default=400)
+        sp.add_argument("--batch-size", type=positive_int, default=None, help="split sample paths into smaller batches")
 
     sp = sub.add_parser("data", help="fetch and validate public daily klines")
     sp.add_argument("--symbol", default="BTCUSDT")
@@ -300,18 +310,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("benchmark", help="load/inference time and memory")
     common(sp)
     sp.add_argument("--smoke", action="store_true", help="1 path, horizon 7, 1 timed run")
-    sp.add_argument("--horizon", type=int, default=30)
-    sp.add_argument("--stages", type=int, nargs="+", default=[1, 5, 20])
-    sp.add_argument("--repeats", type=int, default=3)
+    sp.add_argument("--horizon", type=positive_int, default=30)
+    sp.add_argument("--stages", type=positive_int, nargs="+", default=[1, 5, 20])
+    sp.add_argument("--repeats", type=positive_int, default=3)
     sp.add_argument("--budget", type=float, default=600.0, help="stop escalating if one run exceeds this many seconds")
     sp.set_defaults(func=cmd_benchmark)
 
     sp = sub.add_parser("evaluate", help="rolling-origin accuracy vs naive baseline")
     common(sp)
-    sp.add_argument("--horizons", type=int, nargs="+", default=[7, 14, 30])
-    sp.add_argument("--n-origins", type=int, default=8)
-    sp.add_argument("--stride", type=int, default=None, help="bars between origins (default: max horizon)")
-    sp.add_argument("--n-paths", type=int, default=20)
+    sp.add_argument("--horizons", type=positive_int, nargs="+", default=[7, 14, 30])
+    sp.add_argument("--n-origins", type=positive_int, default=8)
+    sp.add_argument("--stride", type=positive_int, default=None, help="bars between origins (default: max horizon)")
+    sp.add_argument("--n-paths", type=positive_int, default=20)
     sp.add_argument("--seed", type=int, default=20260101)
     sp.set_defaults(func=cmd_evaluate)
 
@@ -322,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    safe_console()
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -329,6 +340,9 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KQLError as exc:
         log.error("%s: %s", type(exc).__name__, exc)
+        return 2
+    except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as exc:
+        log.error("file problem - %s: %s", type(exc).__name__, exc)
         return 2
 
 

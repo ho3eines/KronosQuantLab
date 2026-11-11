@@ -121,7 +121,7 @@ with tabs[2]:
         if runs.empty:
             st.info("هنوز پیش‌بینی‌ای ذخیره نشده است.")
         else:
-            run_id = st.selectbox("اجرا", runs["id"], format_func=lambda i: (
+            run_id: int = st.selectbox("اجرا", runs["id"], format_func=lambda i: (
                 f"#{i} · {runs.set_index('id').loc[i, 'model']} · {runs.set_index('id').loc[i, 'origin_ts'][:10]}"))
             q = load_forecast_quantiles(conn, int(run_id))
             st.plotly_chart(candle_figure(engine.load_candles(conn, symbol).tail(180), q), width="stretch")
@@ -137,10 +137,10 @@ with tabs[3]:
         if st.button("اجرای ارزیابی و کالیبراسیون"):
             cfg = EvalConfig(lookback=int(lookback), n_origins=int(n_origins), n_paths=int(n_paths))
             guarded("اجرای rolling", lambda: services.calibrate(conn, symbol, model, cfg, frac, level))
-    runs = services.calibration_runs()
-    if not runs:
+    cal_runs = services.calibration_runs()
+    if not cal_runs:
         st.info("هنوز کالیبراسیونی اجرا نشده است.")
-    for run in runs[:5]:
+    for run in cal_runs[:5]:
         with st.expander(f"{Path(run['run_dir']).name} · {run['symbol']} · {run['model']} · {run['n_origins_executed']} مبدأ"):
             st.dataframe(pd.DataFrame(run["calibration"]), hide_index=True, width="stretch")
             st.dataframe(pd.DataFrame(run["metrics"]), hide_index=True, width="stretch")
@@ -155,20 +155,26 @@ with tabs[4]:
         fee = c3.number_input("کارمزد (bps)", 0.0, 100.0, 10.0)
         slip = c4.number_input("اسلیپیج (bps)", 0.0, 100.0, 5.0)
         if st.button("اجرای بک‌تست"):
-            params, source = services.signal_params(symbol, model)
-            cfg = BacktestConfig(lookback=int(lookback), n_paths=int(n_paths), rebalance_every=int(every),
-                                 n_decisions=int(n_dec), costs=Costs(fee_bps=fee, slippage_bps=slip))
-            guarded("بک‌تست", lambda: services.backtest(conn, symbol, model, params, cfg, source))
-    runs = services.backtest_runs()
-    if not runs:
+            def job():
+                cfg = BacktestConfig(lookback=int(lookback), n_paths=int(n_paths), rebalance_every=int(every),
+                                     n_decisions=int(n_dec), costs=Costs(fee_bps=fee, slippage_bps=slip))
+                params, source = services.signal_params(symbol, model, services.backtest_start(conn, symbol, cfg))
+                return services.backtest(conn, symbol, model, params, cfg, source)
+
+            done = guarded("بک‌تست", job)
+            if done and done[0].errors:
+                st.warning(f"{len(done[0].errors)} تصمیم ناموفق بود و «بدون اقدام» حساب شد: {done[0].errors[0]['error']}")
+    bt_runs = services.backtest_runs()
+    if not bt_runs:
         st.info("هنوز بک‌تستی اجرا نشده است.")
     else:
-        pick = st.selectbox("اجرای بک‌تست", range(len(runs)), format_func=lambda i: (
-            f"{Path(runs[i]['run_dir']).name} · {runs[i]['symbol']} · {runs[i]['model']}"))
-        run = runs[pick]
+        pick = st.selectbox("اجرای بک‌تست", range(len(bt_runs)), format_func=lambda i: (
+            f"{Path(bt_runs[i]['run_dir']).name} · {bt_runs[i]['symbol']} · {bt_runs[i]['model']}"))
+        run = bt_runs[pick]
         if run.get("synthetic_data"):
             st.error("این بک‌تست روی داده ساختگی اجرا شده است.")
         st.dataframe(pd.DataFrame(run["metrics"]).T, width="stretch")
+        st.caption(f"بازه: {run.get('interval_factor_source', '')}")
         eq = pd.read_csv(Path(run["run_dir"]) / "equity.csv")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=eq["timestamp"], y=eq["equity"], name="strategy"))
@@ -216,3 +222,5 @@ with tabs[6]:
         for f in files:
             with st.expander(f"{d.name}/{f.name}"):
                 st.json(json.loads(f.read_text(encoding="utf-8")), expanded=False)
+
+conn.close()

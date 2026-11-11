@@ -10,6 +10,7 @@ forecast of future performance and not evidence of profitability.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -18,7 +19,7 @@ import pandas as pd
 
 from app.backtest.execution import Costs, rebalance
 from app.core.config import TRADING_DAYS_PER_YEAR
-from app.core.errors import DataValidationError, KQLError
+from app.core.errors import DataValidationError, KQLError, require
 from app.forecast.base import Forecaster
 from app.signals.pipeline import decide_at
 from app.signals.regime import RegimeParams
@@ -36,6 +37,12 @@ class BacktestConfig:
     initial_cash: float = 10_000.0
     seed: int = 20260101
     costs: Costs = Costs()
+
+    def __post_init__(self) -> None:
+        for name in ("lookback", "rebalance_every", "n_decisions"):
+            require(getattr(self, name) >= 1, f"{name} must be at least 1")
+        require(self.n_paths >= 2, "n_paths must be at least 2 (quantiles need several paths)")
+        require(math.isfinite(self.initial_cash) and self.initial_cash > 0, "initial_cash must be positive")
 
 
 @dataclass

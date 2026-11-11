@@ -11,7 +11,8 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -53,9 +54,15 @@ def fetch_klines(
             raise DataValidationError(f"unexpected response from {url}: {str(page)[:200]}")
         if not page:
             break
+        try:
+            first_open, last_open = int(page[0][0]), int(page[-1][0])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise DataValidationError(f"malformed kline row from {url}: {str(page[0])[:120]}") from exc
+        if first_open < cursor or last_open < first_open:
+            raise DataValidationError(f"{url} returned rows outside the requested range; refusing to continue")
         rows.extend(page)
         log.info("fetched %d rows (total %d)", len(page), len(rows))
-        cursor = int(page[-1][0]) + 1
+        cursor = last_open + 1
         if len(page) < PAGE_LIMIT:
             break
     if not rows:

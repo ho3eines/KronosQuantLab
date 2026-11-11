@@ -1,12 +1,11 @@
 """SQLite storage (stdlib sqlite3). One local file; no server, no cloud."""
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from app.core.runs import utc_now
+from app.core.runs import dumps, utc_now
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS candles (
@@ -58,5 +57,5 @@ def connect(path: Path | str) -> sqlite3.Connection:
 def audit(conn: sqlite3.Connection, event: str, payload: dict[str, Any]) -> None:
     conn.execute(
         "INSERT INTO audit_log (ts_utc, event, payload) VALUES (?, ?, ?)",
-        (utc_now().isoformat(timespec="seconds"), event, json.dumps(payload, default=str, ensure_ascii=False)),
+        (utc_now().isoformat(timespec="seconds"), event, dumps(payload)),
     )

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from app.core.config import CLOSE_INDEX, FEATURE_COLUMNS
-from app.core.errors import DataValidationError, ForecastError
+from app.core.errors import DataValidationError, ForecastError, require
 from app.evaluation import metrics
 from app.forecast.base import Forecaster, make_window
 
@@ -25,6 +25,11 @@ class EvalConfig:
     stride: int = 30  # = max horizon, so target windows of different origins do not overlap
     n_paths: int = 20
     seed: int = 20260101
+
+    def __post_init__(self) -> None:
+        require(len(self.horizons) > 0 and all(h >= 1 for h in self.horizons), "horizons must be positive")
+        for name in ("lookback", "n_origins", "stride", "n_paths"):
+            require(getattr(self, name) >= 1, f"{name} must be at least 1")
 
     @property
     def max_horizon(self) -> int:

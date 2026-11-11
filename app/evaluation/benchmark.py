@@ -5,7 +5,8 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ class ResourceMonitor:
             self.peak_rss = max(self.peak_rss, self.rss())
             self._cpu.append(self._proc.cpu_percent(None))
 
-    def __enter__(self) -> "ResourceMonitor":
+    def __enter__(self) -> ResourceMonitor:
         self.peak_rss = self.rss()
         self._cpu = []
         self._stop.clear()

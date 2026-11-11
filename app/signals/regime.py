@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from app.core.config import TRADING_DAYS_PER_YEAR
-from app.core.errors import DataValidationError
+from app.core.errors import DataValidationError, require
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,11 @@ class RegimeParams:
     vol_history: int = 365  # how far back current volatility is ranked
     low_pct: float = 0.25
     high_pct: float = 0.75
+
+    def __post_init__(self) -> None:
+        for name in ("trend_window", "slope_lag", "vol_window", "vol_history"):
+            require(getattr(self, name) >= 2, f"{name} must be at least 2")
+        require(0 <= self.low_pct < self.high_pct <= 1, "need 0 <= low_pct < high_pct <= 1")
 
     @property
     def min_bars(self) -> int:
@@ -43,10 +48,16 @@ def detect_regime(close: pd.Series, params: RegimeParams = RegimeParams()) -> Re
     if len(c) < params.min_bars:
         raise DataValidationError(f"regime needs at least {params.min_bars} bars, got {len(c)}")
     sma = c.rolling(params.trend_window).mean()
-    above = c.iloc[-1] > sma.iloc[-1]
-    rising = sma.iloc[-1] > sma.iloc[-1 - params.slope_lag]
-    trend = "up" if (above and rising) else "down" if (not above and not rising) else "sideways"
-    vol = np.log(c).diff().rolling(params.vol_window).std() * np.sqrt(TRADING_DAYS_PER_YEAR)
+    if not (np.isfinite(c).all() and (c > 0).all()):
+        raise DataValidationError("regime needs finite, positive closes")
+    last, sma_now, sma_then = float(c.iloc[-1]), float(sma.iloc[-1]), float(sma.iloc[-1 - params.slope_lag])
+    if last > sma_now and sma_now > sma_then:
+        trend = "up"
+    elif last < sma_now and sma_now < sma_then:
+        trend = "down"
+    else:
+        trend = "sideways"  # includes a perfectly flat market
+    vol = pd.Series(np.log(c.to_numpy())).diff().rolling(params.vol_window).std() * np.sqrt(TRADING_DAYS_PER_YEAR)
     hist = vol.dropna().iloc[-params.vol_history:]
     current = float(hist.iloc[-1])
     # mid-rank, so a series with constant volatility ranks 0.5 ("normal"), not 1.0

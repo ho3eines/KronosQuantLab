@@ -1,7 +1,6 @@
 """P2 calibration, P3 signals, P4 backtest, P5 paper simulator."""
 from __future__ import annotations
 
-import sqlite3
 
 import numpy as np
 import pandas as pd
@@ -14,10 +13,10 @@ from app.core.errors import DataValidationError, ForecastError
 from app.evaluation.calibration import apply_factor, calibrate_split, conformal_factor, interval_scores
 from app.paper import simulator
 from app.signals.pipeline import decide_at
-from app.signals.regime import Regime, RegimeParams, detect_regime
+from app.signals.regime import Regime, detect_regime
 from app.signals.rules import ABSTAIN, BUY, SELL, SignalParams, decide, position_fraction
 from app.storage.db import connect
-from tests.conftest import FakeForecaster, make_ohlcv
+from tests.conftest import FakeForecaster
 
 
 # ---------------------------------------------------------------- calibration
@@ -88,7 +87,8 @@ def test_calibration_factor_changes_the_decision():
 def test_position_size_is_never_leveraged():
     assert position_fraction(0.1, P) == 1.0
     assert position_fraction(0.1, SignalParams(max_fraction=5.0)) == 1.0
-    assert position_fraction(0.0, P) == 0.0
+    assert position_fraction(0.0, P) == 1.0  # no measured vol: capped, and a BUY never becomes an exit
+    assert position_fraction(float("nan"), P) == 0.0
 
 
 # ---------------------------------------------------------------- execution

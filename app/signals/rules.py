@@ -9,9 +9,11 @@ equity; SELL = be flat (there is no shorting); ABSTAIN = leave the position as i
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from app.core.errors import ForecastError, require
 from app.signals.regime import Regime
 
 BUY, SELL, ABSTAIN = "BUY", "SELL", "ABSTAIN"
@@ -27,6 +29,13 @@ class SignalParams:
     target_annual_vol: float = 0.40  # volatility-targeted sizing
     max_fraction: float = 1.0  # never leveraged
     interval_factor: float = 1.0  # calibration factor applied to the P10-P90 band
+
+    def __post_init__(self) -> None:
+        require(self.horizon >= 1, "horizon must be at least 1")
+        for name in ("min_edge", "max_downside", "target_annual_vol", "max_fraction", "interval_factor"):
+            value = getattr(self, name)
+            require(math.isfinite(value) and value >= 0, f"{name} must be a non-negative number, got {value}")
+        require(self.interval_factor > 0, "interval_factor must be positive")
 
 
 @dataclass(frozen=True)
@@ -45,13 +54,17 @@ class Decision:
 def position_fraction(realized_vol_annual: float, params: SignalParams) -> float:
     """Volatility targeting, capped at ``max_fraction`` (<= 1, i.e. no leverage)."""
     cap = min(max(params.max_fraction, 0.0), 1.0)
-    if realized_vol_annual <= 0:
+    if not math.isfinite(realized_vol_annual):
         return 0.0
+    if realized_vol_annual <= 0:
+        return cap  # no measured volatility: the cap is the only limit (0 would turn a BUY into an exit)
     return float(min(cap, params.target_annual_vol / realized_vol_annual))
 
 
 def decide(p10: float, p50: float, p90: float, last_close: float, regime: Regime, params: SignalParams) -> Decision:
     """Quantiles are RAW close forecasts at ``params.horizon``; the calibration factor is applied here."""
+    if not (last_close > 0 and all(math.isfinite(v) for v in (p10, p50, p90))):
+        raise ForecastError(f"cannot decide on last_close={last_close}, quantiles=({p10}, {p50}, {p90})")
     lo = p50 - params.interval_factor * (p50 - p10)
     hi = p50 + params.interval_factor * (p90 - p50)
     r10, r50, r90 = lo / last_close - 1.0, p50 / last_close - 1.0, hi / last_close - 1.0

@@ -16,7 +16,6 @@ Models: baseline-bootstrap (built in), kronos-small, kronos-base (need downloade
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -30,6 +29,7 @@ from app.backtest.engine import BacktestConfig  # noqa: E402
 from app.backtest.execution import Costs  # noqa: E402
 from app.core import config  # noqa: E402
 from app.core.errors import KQLError  # noqa: E402
+from app.core.runs import dumps, safe_console  # noqa: E402
 from app.data import engine  # noqa: E402
 from app.evaluation.rolling import EvalConfig  # noqa: E402
 from app.forecast.registry import BASELINE, MODEL_NAMES, model_available  # noqa: E402
@@ -39,8 +39,22 @@ log = logging.getLogger("kql")
 DISCLAIMER = "Research output only - not a trading signal, not financial advice, no real orders exist in this project."
 
 
-def _show(obj) -> None:
-    print(json.dumps(obj, indent=2, default=str, ensure_ascii=False))
+def _show(obj: object) -> None:
+    print(dumps(obj))
+
+
+def positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {text}")
+    return value
+
+
+def path_count(text: str) -> int:
+    value = int(text)
+    if value < 2:
+        raise argparse.ArgumentTypeError("at least 2 sample paths are needed for quantiles")
+    return value
 
 
 def cmd_data(args: argparse.Namespace) -> int:
@@ -104,10 +118,11 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
 def cmd_backtest(args: argparse.Namespace) -> int:
     conn = services.open_db()
-    params, source = services.signal_params(args.symbol, args.model, horizon=args.horizon, min_edge=args.min_edge)
     cfg = BacktestConfig(lookback=args.lookback, n_paths=args.n_paths, rebalance_every=args.rebalance_every,
                          n_decisions=args.n_decisions, initial_cash=args.cash,
                          costs=Costs(fee_bps=args.fee_bps, slippage_bps=args.slippage_bps))
+    params, source = services.signal_params(args.symbol, args.model, services.backtest_start(conn, args.symbol, cfg),
+                                            horizon=args.horizon, min_edge=args.min_edge)
     res, summary = services.backtest(conn, args.symbol, args.model, params, cfg, source, args.device)
     print(pd.DataFrame(summary["metrics"]).T.to_string(float_format=lambda v: f"{v:,.4f}"))
     print(f"\nperiod {summary['period'][0][:10]} .. {summary['period'][1][:10]}; interval factor "
@@ -115,6 +130,10 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     if summary["synthetic_data"]:
         print("SYNTHETIC DATA: these numbers say nothing about any real market.")
     print(summary["disclaimer"])
+    if res.errors:
+        print(f"WARNING: {len(res.errors)} of {len(res.errors) + len(res.decisions)} decisions failed "
+              f"(first: {res.errors[0]['error']}). Failed decisions were treated as 'do nothing'.")
+        return 1
     return 0
 
 
@@ -148,39 +167,39 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--symbol", default=config.DEFAULT_SYMBOLS[0])
         sp.add_argument("--model", choices=MODEL_NAMES, default=BASELINE)
         sp.add_argument("--device", choices=["cpu", "auto"], default="cpu")
-        sp.add_argument("--lookback", type=int, default=400)
-        sp.add_argument("--n-paths", type=int, default=20)
+        sp.add_argument("--lookback", type=positive_int, default=400)
+        sp.add_argument("--n-paths", type=path_count, default=20)
 
     sp = sub.add_parser("data")
     sp.add_argument("action", choices=["update", "demo", "import", "status"])
     sp.add_argument("--symbols", nargs="+", default=list(config.DEFAULT_SYMBOLS))
     sp.add_argument("--symbol")
     sp.add_argument("--csv")
-    sp.add_argument("--rows", type=int, default=900)
+    sp.add_argument("--rows", type=positive_int, default=900)
     sp.set_defaults(func=cmd_data)
 
     sub.add_parser("models").set_defaults(func=cmd_models)
 
     sp = sub.add_parser("forecast")
     common(sp)
-    sp.add_argument("--horizon", type=int, default=30)
+    sp.add_argument("--horizon", type=positive_int, default=30)
     sp.set_defaults(func=cmd_forecast)
 
     sp = sub.add_parser("calibrate")
     common(sp)
-    sp.add_argument("--horizons", type=int, nargs="+", default=[7, 14, 30])
-    sp.add_argument("--n-origins", type=int, default=16)
-    sp.add_argument("--stride", type=int, default=None)
+    sp.add_argument("--horizons", type=positive_int, nargs="+", default=[7, 14, 30])
+    sp.add_argument("--n-origins", type=positive_int, default=16)
+    sp.add_argument("--stride", type=positive_int, default=None)
     sp.add_argument("--calib-fraction", type=float, default=0.5)
     sp.add_argument("--level", type=float, default=0.8)
     sp.set_defaults(func=cmd_calibrate)
 
     sp = sub.add_parser("backtest")
     common(sp)
-    sp.add_argument("--horizon", type=int, default=7)
+    sp.add_argument("--horizon", type=positive_int, default=7)
     sp.add_argument("--min-edge", type=float, default=0.02)
-    sp.add_argument("--rebalance-every", type=int, default=7)
-    sp.add_argument("--n-decisions", type=int, default=26)
+    sp.add_argument("--rebalance-every", type=positive_int, default=7)
+    sp.add_argument("--n-decisions", type=positive_int, default=26)
     sp.add_argument("--cash", type=float, default=10_000.0)
     sp.add_argument("--fee-bps", type=float, default=10.0)
     sp.add_argument("--slippage-bps", type=float, default=5.0)
@@ -197,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    safe_console()
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -204,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KQLError as exc:
         log.error("%s: %s", type(exc).__name__, exc)
+        return 2
+    except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as exc:
+        log.error("file problem - %s: %s", type(exc).__name__, exc)  # missing / unreadable / malformed file
         return 2
 
 
