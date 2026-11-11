@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from app.core import config, timeframes
 from app.core.config import CLOSE_INDEX
 from app.core.errors import ForecastError
 from app.core.runs import utc_now
@@ -40,14 +41,15 @@ def origin_seed(base_seed: int, origin_ts: pd.Timestamp) -> int:
 
 def make_forecast(
     df: pd.DataFrame, forecaster: Forecaster, lookback: int, horizon: int, n_paths: int,
-    base_seed: int = 20260101, origin: int | None = None,
+    base_seed: int = 20260101, origin: int | None = None, interval: str | None = None,
 ) -> Forecast:
     """Forecast the ``horizon`` bars after row ``origin - 1`` (default: after the last row)."""
     if n_paths < 2:
         raise ForecastError("n_paths must be at least 2: quantiles cannot be computed from one path")
     origin = len(df) if origin is None else origin
     lookback = min(lookback, origin)
-    win = make_window(df, origin, lookback, horizon)
+    freq = timeframes.freq(interval) if interval is not None else None
+    win = make_window(df, origin, lookback, horizon, freq=freq)
     origin_ts = pd.Timestamp(win.context["timestamp"].iloc[-1])
     seed = origin_seed(base_seed, origin_ts)
     paths = forecaster.sample_paths(win.context, win.future_ts, n_paths, seed)
@@ -56,13 +58,19 @@ def make_forecast(
                     paths, p10, p50, p90, seed, lookback)
 
 
-def save_forecast(conn: sqlite3.Connection, symbol: str, fc: Forecast) -> int:
+def save_forecast(
+    conn: sqlite3.Connection, symbol: str, fc: Forecast, interval: str | None = None,
+    sampling: config.SamplingConfig | None = None,
+) -> int:
+    interval = timeframes.normalize(interval or config.INTERVAL)
+    sampling = sampling or config.SamplingConfig()
     with conn:
         cur = conn.execute(
-            "INSERT INTO forecast_runs (created_utc, symbol, model, origin_ts, last_close, horizon, n_paths, seed, lookback) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO forecast_runs (created_utc, symbol, model, origin_ts, last_close, horizon, n_paths, seed, "
+            "lookback, interval, temperature, top_p, top_k) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (utc_now().isoformat(timespec="seconds"), symbol, fc.model, fc.origin_ts.isoformat(), fc.last_close,
-             fc.horizon, int(fc.paths.shape[0]), fc.seed, fc.lookback),
+             fc.horizon, int(fc.paths.shape[0]), fc.seed, fc.lookback, interval,
+             sampling.temperature, sampling.top_p, sampling.top_k),
         )
         run_id = int(cur.lastrowid or 0)
         conn.executemany(
@@ -74,9 +82,18 @@ def save_forecast(conn: sqlite3.Connection, symbol: str, fc: Forecast) -> int:
     return run_id
 
 
-def load_forecast_runs(conn: sqlite3.Connection, symbol: str | None = None) -> pd.DataFrame:
-    q = "SELECT * FROM forecast_runs" + (" WHERE symbol = ?" if symbol else "") + " ORDER BY id DESC"
-    return pd.read_sql_query(q, conn, params=(symbol,) if symbol else ())
+def load_forecast_runs(
+    conn: sqlite3.Connection, symbol: str | None = None, interval: str | None = None
+) -> pd.DataFrame:
+    clauses, params = [], []
+    if symbol:
+        clauses.append("symbol = ?")
+        params.append(symbol)
+    if interval:
+        clauses.append("interval = ?")
+        params.append(timeframes.normalize(interval))
+    q = "SELECT * FROM forecast_runs" + (" WHERE " + " AND ".join(clauses) if clauses else "") + " ORDER BY id DESC"
+    return pd.read_sql_query(q, conn, params=tuple(params))
 
 
 def load_forecast_quantiles(conn: sqlite3.Connection, run_id: int) -> pd.DataFrame:

@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS candles (
 CREATE TABLE IF NOT EXISTS forecast_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_utc TEXT NOT NULL, symbol TEXT NOT NULL,
     model TEXT NOT NULL, origin_ts TEXT NOT NULL, last_close REAL NOT NULL, horizon INTEGER NOT NULL,
-    n_paths INTEGER NOT NULL, seed INTEGER NOT NULL, lookback INTEGER NOT NULL
+    n_paths INTEGER NOT NULL, seed INTEGER NOT NULL, lookback INTEGER NOT NULL,
+    interval TEXT NOT NULL DEFAULT '1d',
+    temperature REAL, top_p REAL, top_k INTEGER
 );
 CREATE TABLE IF NOT EXISTS forecast_quantiles (
     run_id INTEGER NOT NULL REFERENCES forecast_runs(id), step INTEGER NOT NULL, ts TEXT NOT NULL,
@@ -51,7 +53,27 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring databases created by older versions up to the current schema.
+
+    Only additive changes are allowed here: the candle table and the audit log are
+    never rewritten.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(forecast_runs)")}
+    additions = {
+        "interval": "TEXT NOT NULL DEFAULT '1d'",  # forecasts used to be daily-only
+        "temperature": "REAL",  # sampling settings used by the run (for reproducibility)
+        "top_p": "REAL",
+        "top_k": "INTEGER",
+    }
+    with conn:
+        for name, decl in additions.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE forecast_runs ADD COLUMN {name} {decl}")
 
 
 def audit(conn: sqlite3.Connection, event: str, payload: dict[str, Any]) -> None:

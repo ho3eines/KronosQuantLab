@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.core import config, timeframes
 from app.core.config import CLOSE_INDEX, FEATURE_COLUMNS
 from app.core.errors import DataValidationError, ForecastError, require
 from app.evaluation import metrics
@@ -25,11 +26,16 @@ class EvalConfig:
     stride: int = 30  # = max horizon, so target windows of different origins do not overlap
     n_paths: int = 20
     seed: int = 20260101
+    interval: str = config.INTERVAL
 
     def __post_init__(self) -> None:
         require(len(self.horizons) > 0 and all(h >= 1 for h in self.horizons), "horizons must be positive")
+        require(max(self.horizons) <= config.MAX_HORIZON,
+                f"horizons must not exceed MAX_HORIZON={config.MAX_HORIZON}")
         for name in ("lookback", "n_origins", "stride", "n_paths"):
             require(getattr(self, name) >= 1, f"{name} must be at least 1")
+        require(self.lookback <= config.MAX_CONTEXT, f"lookback must not exceed {config.MAX_CONTEXT}")
+        timeframes.normalize(self.interval)
 
     @property
     def max_horizon(self) -> int:
@@ -61,7 +67,7 @@ def run_forecasts(df: pd.DataFrame, forecaster: Forecaster, cfg: EvalConfig) -> 
     h = cfg.max_horizon
     paths, actual, last_close, used, stamps, seconds, errors = [], [], [], [], [], [], []
     for k, origin in enumerate(origins):
-        win = make_window(df, origin, cfg.lookback, h)
+        win = make_window(df, origin, cfg.lookback, h, freq=timeframes.freq(cfg.interval))
         assert win.actual is not None  # guaranteed by choose_origins
         seed = cfg.seed + origin  # identical for every model -> fair comparison
         start = time.perf_counter()

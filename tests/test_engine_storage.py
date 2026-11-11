@@ -38,7 +38,7 @@ def test_store_and_load_roundtrip(conn, ohlcv):
     assert out["inserted"] == len(ohlcv)
     back = engine.load_candles(conn, "X")
     pd.testing.assert_frame_equal(back, ohlcv, check_exact=False)
-    assert engine.data_status(conn)[0]["missing_days"] == 0
+    assert engine.data_status(conn)[0]["missing_bars"] == 0
 
 
 def test_incremental_update_only_adds_new_complete_candles(conn, ohlcv):

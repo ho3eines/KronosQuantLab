@@ -86,6 +86,7 @@ def fill_pending(conn: sqlite3.Connection, symbol: str, df: pd.DataFrame, costs:
 def step(
     conn: sqlite3.Connection, symbol: str, df: pd.DataFrame, forecaster: Forecaster, params: SignalParams,
     lookback: int = 400, n_paths: int = 20, costs: Costs = Costs(), base_seed: int = 20260101,
+    interval: str | None = None,
 ) -> dict[str, Any]:
     _account(conn)
     df = df.reset_index(drop=True)
@@ -95,7 +96,7 @@ def step(
         result["note"] = f"decision for {last_ts[:10]} already recorded"
         return result
     try:
-        ctx = decide_at(df, len(df) - 1, forecaster, params, lookback, n_paths, base_seed)
+        ctx = decide_at(df, len(df) - 1, forecaster, params, lookback, n_paths, base_seed, interval=interval)
     except KQLError as exc:
         with conn:
             audit(conn, "paper_decision_failed", {"symbol": symbol, "decision_ts": last_ts, "error": str(exc)})

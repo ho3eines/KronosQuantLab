@@ -92,15 +92,16 @@ def _env_summary() -> dict[str, Any]:
 
 # ----------------------------------------------------------------------------- commands
 def cmd_data(args: argparse.Namespace) -> int:
-    from app.data.binance import fetch_klines, klines_to_frame
+    from app.data.binance import active_base_url, fetch_klines, klines_to_frame
     from app.data.validation import validate_ohlcv
 
     now = utc_now()
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
-    rows = fetch_klines(args.symbol, "1d", config.BINANCE_BASE_URL)
+    rows = fetch_klines(args.symbol, "1d", config.BINANCE_BASE_URLS)
+    used_host = active_base_url() or config.BINANCE_BASE_URLS[0]
     raw_path = config.DATASETS_DIR / "raw" / f"{args.symbol}_1d_{stamp}.json"
     write_json_new(raw_path, {
-        "source": f"{config.BINANCE_BASE_URL}/api/v3/klines", "symbol": args.symbol, "interval": "1d",
+        "source": f"{used_host}/api/v3/klines", "symbol": args.symbol, "interval": "1d",
         "fetched_at_utc": now.isoformat(), "rows": rows,
     })
     clean, report = validate_ohlcv(klines_to_frame(rows), now=now)
@@ -122,7 +123,9 @@ def cmd_models(args: argparse.Namespace) -> int:
     total = sum(m["total_bytes"] for m in metas.values())
     free = weights.free_bytes(config.MODELS_DIR)
     for key, m in metas.items():
-        print(f"\n[{key}] {m['repo_id']}\n  commit : {m['resolved_sha']}\n  license: {m['license']}\n"
+        print(f"\n[{key}] {m['repo_id']}\n  tokenizer: {m.get('tokenizer_id')}"
+              f"\n  parameters: {m.get('documented_parameters')}  context: {m.get('context_length')}"
+              f"\n  commit : {m['resolved_sha']}\n  license: {m['license']}\n"
               f"  size   : {m['total_bytes'] / 1e6:.1f} MB")
         for f in m["files"]:
             print(f"    {f['name']}  {(f['bytes'] or 0) / 1e6:.2f} MB")

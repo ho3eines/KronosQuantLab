@@ -6,13 +6,14 @@
 
 | مسیر | مرحله | مسئولیت |
 |---|---|---|
-| `app/core/config.py` | — | مسیرها، شناسه مدل‌ها، ترتیب ستون‌ها، ثابت‌ها |
+| `app/core/config.py` | — | مسیرها، شناسه مدل‌ها و توکنایزر، دامنه‌های Binance، سقف پنجره، تنظیمات نمونه‌گیری و پرتفوی |
+| `app/core/timeframes.py` | — | نگاشت بازه کندل (1h/4h/1d) به طول گام و تعداد کندل در سال |
 | `app/core/errors.py` | — | سلسله خطاهای قابل انتظار (`KQLError`) |
 | `app/core/runs.py` | — | پوشه اجرا و نوشتن فایل بدون بازنویسی |
 | `app/storage/db.py` | P1 | طرح SQLite و audit log فقط‌افزودنی |
-| `app/data/binance.py` | P0 | دریافت kline عمومی |
+| `app/data/binance.py` | P0 | دریافت kline عمومی با جایگزینی خودکار دامنه در خطای 451/403 |
 | `app/data/validation.py` | P0 | اعتبارسنجی و پاک‌سازی محافظه‌کارانه |
-| `app/data/engine.py` | P1 | provider ← اعتبارسنجی ← SQLite؛ به‌روزرسانی افزایشی چند نماد |
+| `app/data/engine.py` | P1 | provider ← اعتبارسنجی ← SQLite؛ به‌روزرسانی افزایشی چند نماد و چند بازه |
 | `app/forecast/base.py` | P0 | قرارداد `Forecaster` و ساخت پنجره بدون نشت |
 | `app/forecast/kronos_adapter.py` | P0 | Kronos از پوشه محلی، مسیرهای جداگانه |
 | `app/forecast/weights.py` | P0 | مجوز، حجم و دانلود وزن‌ها |
@@ -27,8 +28,10 @@
 | `app/signals/regime.py` | P3 | رژیم روند × نوسان از داده گذشته |
 | `app/signals/rules.py` | P3 | BUY / SELL / ABSTAIN و اندازه موقعیت |
 | `app/signals/pipeline.py` | P3 | تنها نقطه برش تاریخچه: تصمیم در کندل t با داده ۰ تا t |
+| `app/signals/validation.py` | P3 | کالیبراسیون آستانه‌ها: ARI، توزیع صفر با جایگشت، پایداری با بوت‌استرپ |
 | `app/backtest/execution.py` | P4 | محاسبه fill با کارمزد و اسلیپیج |
-| `app/backtest/engine.py` | P4 | بک‌تست walk-forward و معیارهای عملکرد |
+| `app/backtest/engine.py` | P4 | بک‌تست walk-forward تک‌دارایی و معیارهای عملکرد |
+| `app/backtest/portfolio.py` | P4 | شبیه‌ساز سبد Qlib-style (TopkDropout)، چند نماد، هم‌وزن و کارمزد |
 | `app/paper/simulator.py` | P5 | حساب فرضی، سفارش معلق، audit |
 | `app/services.py` | — | use-caseهای مشترک CLI و داشبورد |
 | `app/ui/dashboard.py` | P5 | Streamlit؛ فقط نمایش و فراخوانی سرویس |
@@ -44,13 +47,18 @@ provider ─► validate ─► SQLite(candles)
                           ▼
      decide_at(df, t):  past = df[:t+1]          ← تنها برش تاریخچه
           ├─ make_forecast(past) ─► paths ─► P10/P50/P90
-          ├─ detect_regime(past.close)
+          ├─ detect_regime(past.close)           (regime_series برداری، همان پیاده‌سازی)
           └─ decide(quantiles × ضریب کالیبراسیون, regime) ─► BUY/SELL/ABSTAIN + کسر هدف
                           │
           ┌───────────────┴───────────────┐
    run_backtest (P4)               paper.step (P5)
    اجرا در open کندل t+1           سفارش PENDING ─► fill در open کندل بعدی
    equity.csv / backtest.json      SQLite + audit_log
+
+validate (P3):  close ─► current regime ─┐
+                close ─► forward regime ─┴─► ARI ─► null (permutations) + bootstrap ─► thresholds
+
+portfolio (P4): symbols × bars ─► P50 score per symbol ─► TopkDropout ─► open t+1 ─► equity/trades
 ```
 
 ## قراردادها
@@ -65,6 +73,8 @@ provider ─► validate ─► SQLite(candles)
 
 ## محدودیت‌های شناخته‌شده
 
-- بک‌تست و شبیه‌ساز تک‌دارایی‌اند. در شبیه‌ساز با چند نماد، «کسر هدف» نسبت به نقد به‌علاوه همان موقعیت حساب می‌شود، نه کل سبد.
+- بک‌تست تک‌دارایی و شبیه‌ساز paper همچنان تک‌دارایی‌اند. شبیه‌ساز paper در چند نماد، «کسر هدف» را نسبت به نقد به‌علاوه همان موقعیت حساب می‌کند، نه کل سبد؛ پرتفوی Qlib-style مسیر جداگانه و چندنمادی است.
+- پرتفوی فقط با تقاطع تقویم نمادها کار می‌کند؛ نمادی که تاریخچه کوتاه‌تری دارد، بازه مشترک را کوتاه می‌کند.
+- کالیبراسیون آستانه P3 «آینده» را برای ساختن برچسب هدف می‌بیند (نه برای تصمیم)؛ عبور از آن سودآوری را اثبات نمی‌کند.
 - fill در قیمت باز با اسلیپیج ثابت مدل می‌شود؛ عمق بازار و fill جزئی مدل نشده است.
 - ضریب کالیبراسیون برای هر افق یک عدد است و از گام پایانی همان افق به دست می‌آید.

@@ -39,6 +39,9 @@ def inspect_repo(spec: ModelSpec, api: Any | None = None) -> dict[str, Any]:
     files = [{"name": s.rfilename, "bytes": getattr(s, "size", None)} for s in (info.siblings or [])]
     return {
         "repo_id": spec.repo_id,
+        "tokenizer_id": spec.tokenizer_id,
+        "documented_parameters": spec.parameters,
+        "context_length": spec.context_length,
         "requested_revision": spec.revision,
         "resolved_sha": info.sha,
         "license": license_id,  # None means: the model card declares no license

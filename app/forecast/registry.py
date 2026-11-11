@@ -32,7 +32,12 @@ def model_available(name: str) -> tuple[bool, str]:
     return True, "weights present"
 
 
-def build_forecaster(name: str, device: str = "cpu", batch_size: int | None = None) -> Forecaster:
+def build_forecaster(
+    name: str, device: str = "cpu", batch_size: int | None = None,
+    sampling: config.SamplingConfig | None = None,
+) -> Forecaster:
+    """Create a forecaster. ``sampling`` only affects the stochastic Kronos models."""
+    sampling = sampling or config.SamplingConfig()
     if name == BASELINE:
         return BootstrapForecaster()
     key = name.removeprefix("kronos-")
@@ -43,7 +48,8 @@ def build_forecaster(name: str, device: str = "cpu", batch_size: int | None = No
     resolved, reason = resolve_device(device)
     log.info("device for %s: %s (%s)", name, resolved, reason)
     return KronosForecaster.load(
-        name, config.MODELS[key].local_dir, config.TOKENIZER.local_dir, device=resolved, batch_size=batch_size
+        name, config.MODELS[key].local_dir, config.TOKENIZER.local_dir, device=resolved,
+        batch_size=batch_size, sampling=sampling,
     )
 
 
@@ -59,12 +65,15 @@ class CachedForecaster:
         self.name = inner.name
         self.device = getattr(inner, "device", "n/a")
         self.cache_dir = cache_dir or config.FORECAST_CACHE_DIR
+        self.sampling = getattr(inner, "sampling", None)
         self.hits = 0
         self.misses = 0
 
     def _key(self, context: pd.DataFrame, future_ts: pd.Series, n_paths: int, seed: int) -> str:
         h = hashlib.sha256()
-        h.update(f"{self.name}|{n_paths}|{seed}|{len(future_ts)}|{future_ts.iloc[0]}|{future_ts.iloc[-1]}".encode())
+        sampling = self.sampling
+        sampling_key = f"{sampling.temperature}|{sampling.top_k}|{sampling.top_p}" if sampling else "-"
+        h.update(f"{self.name}|{sampling_key}|{n_paths}|{seed}|{len(future_ts)}|{future_ts.iloc[0]}|{future_ts.iloc[-1]}".encode())
         h.update(np.ascontiguousarray(context[list(config.FEATURE_COLUMNS)].to_numpy(dtype=np.float64)).tobytes())
         h.update(str(context["timestamp"].iloc[0]).encode())
         return h.hexdigest()[:32]

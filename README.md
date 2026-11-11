@@ -1,6 +1,6 @@
 # Kronos Quant Lab
 
-سامانه محلی پژوهشی برای داده روزانه رمزارز: دریافت و اعتبارسنجی داده، پیش‌بینی احتمالاتی با Kronos-small و Kronos-base، کالیبراسیون بازه‌ها، پژوهش قواعد تصمیم، بک‌تست و شبیه‌ساز معامله فرضی با داشبورد.
+سامانه محلی پژوهشی برای داده رمزارز (۱ ساعته، ۴ ساعته یا روزانه): دریافت و اعتبارسنجی داده، پیش‌بینی احتمالاتی با Kronos-small و Kronos-base، کالیبراسیون بازه‌ها، کالیبراسیون آستانه‌های تصمیم، پژوهش قواعد تصمیم، بک‌تست تک‌دارایی و پرتفوی چندنمادی و شبیه‌ساز معامله فرضی با داشبورد.
 
 > **فقط پژوهش و شبیه‌سازی محلی.** این پروژه به هیچ صرافی یا حسابی وصل نمی‌شود، کلید API نمی‌گیرد و هیچ کدی برای ارسال سفارش ندارد. «سفارش»ها ردیف‌هایی در یک فایل SQLite محلی‌اند. هیچ خروجی‌ای توصیه مالی نیست؛ پیش‌بینی قطعیت نیست و نتیجه بک‌تست تضمین سود نیست.
 
@@ -11,8 +11,8 @@
 | P0 مقایسه small و base | نوشته و تست شده | **اجرا نشده** |
 | P1 موتور داده (SQLite) | نوشته و تست شده | اتصال به Binance اجرا نشده |
 | P2 پیش‌بینی و کالیبراسیون | نوشته و تست شده | اجرا نشده |
-| P3 رژیم بازار و قواعد تصمیم | نوشته و تست شده | آستانه‌ها اعتبارسنجی نشده‌اند |
-| P4 بک‌تست | نوشته و تست شده | اجرا نشده |
+| P3 رژیم، قواعد و کالیبراسیون آستانه‌ها | نوشته و تست شده | آستانه‌ها با داده واقعی کالیبره نشده‌اند |
+| P4 بک‌تست تک‌دارایی و پرتفوی | نوشته و تست شده | اجرا نشده |
 | P5 شبیه‌ساز و داشبورد | نوشته و تست شده | اجرا نشده |
 
 محیط توسعه به Hugging Face و Binance دسترسی نداشت. همه چیز با داده **ساختگی**، مدل پایه داخلی و کد واقعی Kronos با وزن تصادفی آزمایش شده است. تا وقتی P0 روی سیستم شما اجرا نشود، معلوم نیست Kronos از روش ساده بهتر است یا نه؛ P3 تا P5 ابزار پژوهش‌اند، نه استراتژی تأییدشده.
@@ -38,7 +38,7 @@ git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 ## گام اول: P0 (پیش از هر چیز دیگر)
 
 ```powershell
-.\.venv\Scripts\python scripts\p0.py models                    # مجوز، حجم، فضای دیسک؛ دانلود نمی‌کند
+.\.venv\Scripts\python scripts\p0.py models                    # مجوز، حجم، شناسه مدل و توکنایزر؛ دانلود نمی‌کند
 .\.venv\Scripts\python scripts\p0.py models --download --yes
 .\.venv\Scripts\python scripts\p0.py data
 .\.venv\Scripts\python scripts\p0.py benchmark --smoke         # ۱ مسیر، افق ۷
@@ -47,27 +47,103 @@ git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 .\.venv\Scripts\python scripts\p0.py report                    # docs\P0_model_benchmark.md
 ```
 
+## تنظیمات (همه غیرمحرمانه)
+
+همه مقادیر از متغیر محیطی خوانده می‌شوند (نمونه در `.env.example`). برای دیدن مقدار مؤثر:
+
+```powershell
+.\.venv\Scripts\python scripts\kql.py settings
+```
+
+### ۱) داده بازار: دو دامنه Binance با جایگزینی خودکار
+
+| تنظیم | پیش‌فرض | توضیح |
+|---|---|---|
+| `KQL_BINANCE_BASE_URL` | `https://data-api.binance.vision` | دامنه اصلی داده عمومی |
+| `KQL_BINANCE_FALLBACK_URLS` | `https://api.binance.com` | دامنه جایگزین؛ با HTTP **451** یا **403** خودکار فعال می‌شود |
+
+در صورت خطای جغرافیایی، دریافت از ابتدا روی دامنه بعدی تکرار می‌شود (ردیف‌های دو دامنه هرگز در یک سری مخلوط نمی‌شوند) و دامنه‌ای که پاسخ داده تا پایان همان پردازه به خاطر سپرده می‌شود. اگر هر دو دامنه مسدود باشند، پیام روشن می‌دهد و `data import --csv` جایگزین است.
+
+### ۲) مدل Kronos با وزن‌های واقعی
+
+| مدل | `model_id` | `tokenizer_id` | پارامتر | طول زمینه |
+|---|---|---|---|---|
+| small | `NeoQuasar/Kronos-small` | `NeoQuasar/Kronos-Tokenizer-base` | حدود 24.7M | 512 |
+| base | `NeoQuasar/Kronos-base` | `NeoQuasar/Kronos-Tokenizer-base` | حدود 102.3M | 512 |
+
+دانلود فقط با `p0.py models --download --yes` انجام می‌شود و مجوز model card پیش از دانلود نشان داده می‌شود. هیچ شناسه‌ای در کد جاسازی نشده تا با `.env` یا نسخه‌های آینده از هم جدا بماند؛ شناسه‌ها در `app/core/config.py` تعریف و با `kql.py models` نمایش داده می‌شوند.
+
+### ۳) آستانه‌های تصمیم (P3)
+
+| پارامتر | پیش‌فرض | معنا |
+|---|---|---|
+| `validation_alpha` | 0.05 | سطح معناداری کران بالای ARI تحت فرضیه صفر |
+| `validation_null_ari_max` | خودکار | حداکثر ARI تحت فرضیه صفر؛ `None` یعنی از جایگشت‌ها کالیبره شود |
+| `validation_stability_threshold` | خودکار | کمینه ARI برای آزمون پایداری؛ `None` یعنی برابر کران صفر |
+| `n_permutations` | 100 | تعداد جایگشت بازده‌ها برای ساخت توزیع صفر |
+| `n_bootstrap` | 50 | تعداد نمونه بوت‌استرپ بلوکی برای سنجش پایداری |
+| `forward_window` | 10 | تعداد کندل «رژیم آینده» که ARI با آن سنجیده می‌شود |
+
+روش: رژیم هر کندل (روند × نوسان از داده گذشته) با رژیم `forward_window` کندل بعدی روی **همان کندل‌ها** با شاخص ARI مقایسه می‌شود. سپس بازده‌ها جایگشت می‌خورند تا معلوم شود ARI تحت تصادف چقدر است، و بوت‌استرپ بلوکی پایداری آماره را می‌سنجد. نتیجه در `artifacts/reports/threshold_validation_*` ذخیره می‌شود و شامل `passed`، توزیع صفر و بازه بوت‌استرپ است. عبور از این آزمون یعنی برچسب‌ها از تصادف جدا و تکرارپذیرند؛ **یعنی قواعد سودآورند نیست**.
+
+```powershell
+.\.venv\Scripts\python scripts\kql.py validate --symbol BTCUSDT --alpha 0.05 --n-permutations 100 --n-bootstrap 50
+```
+
+### ۴) نمونه‌گیری مدل و شبیه‌سازی معاملات
+
+| گروه | پارامتر | پیش‌فرض |
+|---|---|---|
+| نمونه‌گیری | `sample_count` (نام دیگر `--n-paths`) | 20 |
+| نمونه‌گیری | `temperature` (T) | 1.0 |
+| نمونه‌گیری | `top_p` | 0.9 |
+| نمونه‌گیری | `top_k` | 0 (غیرفعال) |
+| پرتفوی | `n_symbol_hold` | 50 |
+| پرتفوی | `n_symbol_drop` | 5 |
+| پرتفوی | `hold_thresh` | 5 کندل |
+| پرتفوی | `time_range` | `--start`/`--end` |
+| پرتفوی | `account` | 100,000,000 |
+| تک‌دارایی | `--cash` | 10,000 |
+
+`sample_count` تعداد مسیرهای نمونه‌گیری‌شده است؛ هرچه بیشتر، ارزیابی عدم‌قطعیت دقیق‌تر و اجرا کندتر. دمای بالاتر مسیرهای جسورانه‌تر و دمای پایین‌تر محافظه‌کارانه‌تر می‌سازد. `top_p`/`top_k` نمونه‌گیری را متمرکز می‌کنند.
+
+### ۵) پنجره و بازه کندل
+
+| پارامتر | پیش‌فرض | محدوده |
+|---|---|---|
+| `lookback` | 400 کندل | حداکثر 512 |
+| `pred_len` (`MAX_HORIZON`) | 96 کندل | حداکثر 96 |
+| `interval` | `1d` | `1h`، `4h`، `1d` |
+
+بازه‌ها در پایگاه داده جدا نگهداری می‌شوند (`candles.interval` و `forecast_runs.interval`) و تنظیمات نمونه‌گیری هر اجرا (`temperature`، `top_p`، `top_k`) نیز در `forecast_runs` ثبت می‌شود. سالانه‌سازی نوسان/شارپ از طول کندل محاسبه می‌شود (365 برای روزانه، 2190 برای ۴ ساعته، 8760 برای ۱ ساعته).
+
 ## کار روزمره (P1 تا P5)
 
 مدل‌ها: `baseline-bootstrap` (داخلی، بدون وزن)، `kronos-small`، `kronos-base`.
 
 ```powershell
 $k = ".\.venv\Scripts\python", "scripts\kql.py"
-& $k[0] $k[1] data update --symbols BTCUSDT ETHUSDT     # P1: کندل‌های جدید به SQLite
-& $k[0] $k[1] data status
+& $k[0] $k[1] settings
+& $k[0] $k[1] data update --symbols BTCUSDT ETHUSDT --interval 1d    # P1: کندل‌های جدید به SQLite
+& $k[0] $k[1] data status --interval 1d
 & $k[0] $k[1] models
-& $k[0] $k[1] forecast  --symbol BTCUSDT --model kronos-small        # P2: P10/P50/P90
-& $k[0] $k[1] calibrate --symbol BTCUSDT --model kronos-small        # P2: پوشش واقعی و ضریب کالیبراسیون
-& $k[0] $k[1] backtest  --symbol BTCUSDT --model kronos-small        # P4
+& $k[0] $k[1] forecast  --symbol BTCUSDT --model kronos-small --horizon 30 --sample-count 20 `
+      --temperature 1.0 --top-p 0.9 --top-k 0                         # P2: P10/P50/P90
+& $k[0] $k[1] calibrate --symbol BTCUSDT --model kronos-small          # P2: پوشش واقعی و ضریب کالیبراسیون
+& $k[0] $k[1] validate  --symbol BTCUSDT                              # P3: کالیبراسیون آستانه‌ها
+& $k[0] $k[1] backtest  --symbol BTCUSDT --model kronos-small          # P4: تک‌دارایی
+& $k[0] $k[1] portfolio --symbols BTCUSDT ETHUSDT SOLUSDT BNBUSDT `
+      --n-symbol-hold 3 --n-symbol-drop 1 --hold-thresh 5 --account 100000000 `
+      --time-range 2024-01-01 2025-12-31                                # P4: پرتفوی Qlib-style
 & $k[0] $k[1] paper init                                             # P5: حساب فرضی
-& $k[0] $k[1] paper step --symbol BTCUSDT --model kronos-small       # روزی یک بار
+& $k[0] $k[1] paper step --symbol BTCUSDT --model kronos-small       # یک بار در هر کندل
 & $k[0] $k[1] paper status
 .\.venv\Scripts\streamlit run app\ui\dashboard.py                    # داشبورد
 ```
 
-بدون اینترنت و بدون وزن هم می‌شود همه مسیر را امتحان کرد: `data demo` یک سری ساختگی با نماد `SYNTH-DEMO` می‌سازد و `baseline-bootstrap` نیازی به وزن ندارد. اعداد این حالت هیچ معنایی برای بازار واقعی ندارند.
+بدون اینترنت و بدون وزن هم می‌شود همه مسیر را امتحان کرد: `data demo` یک سری ساختگی با نماد `SYNTH-DEMO` می‌سازد (`--interval 1h` هم ممکن است) و `baseline-bootstrap` نیازی به وزن ندارد. اعداد این حالت هیچ معنایی برای بازار واقعی ندارند.
 
-هر اجرای `benchmark`، `evaluate`، `calibrate` و `backtest` پوشه تازه‌ای در `artifacts\reports\` می‌سازد و چیزی را بازنویسی نمی‌کند.
+هر اجرای `benchmark`، `evaluate`، `calibrate`، `validate`، `backtest` و `portfolio` پوشه تازه‌ای در `artifacts\reports\` می‌سازد و چیزی را بازنویسی نمی‌کند.
 
 ## قواعد زمانی (کنترل look-ahead)
 
@@ -75,6 +151,18 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 - اجرا در قیمت باز کندل t+1، با کارمزد و اسلیپیج.
 - فقط خرید و نگهداری یا نقد (بدون فروش استقراضی، بدون اهرم).
 - کالیبراسیون روی مبدأهای قدیمی‌تر fit و روی مبدأهای جدیدتر سنجیده می‌شود.
+- `validate` برای ساختن برچسب «آینده» از داده بعد از t استفاده می‌کند، اما آن برچسب‌ها فقط در گزارش می‌مانند و هرگز به تصمیم یا بک‌تست نمی‌رسند.
+
+## پرتفوی Qlib-style
+
+امتیاز هر نماد در کندل t، میانه (P50) بازده پیش‌بینی‌شده تا افق مشخص است. سپس:
+
+1. `n_symbol_hold` نماد برتر نگه داشته می‌شوند؛
+2. حداکثر `n_symbol_drop` نماد از بدترین‌ها فروخته می‌شوند، به شرطی که حداقل `hold_thresh` کندل نگه داشته شده باشند؛
+3. نمادهای بهترِ غیرموجود با وزن مساوی `1 / تعداد نگهداری` خریداری می‌شوند؛
+4. اجرا در باز کندل بعد با کارمزد و اسلیپیج؛ تعداد موقعیت‌ها هرگز از سقف بیشتر و نقد هرگز منفی نمی‌شود.
+
+اگر تعداد نمادها کمتر از `n_symbol_hold` باشد، سقف به تعداد موجود کاهش می‌یابد و در گزارش نوشته می‌شود. نمادی که پیش‌بینی‌اش شکست بخورد از انتخاب کنار گذاشته می‌شود (حدس زده نمی‌شود).
 
 ## مستندات
 
@@ -90,10 +178,12 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 
 | نشانه | اقدام |
 |---|---|
-| Kronos خیلی کند است | `--n-paths 10`، `--n-origins 8`، `--n-decisions 12`. پیش‌بینی‌ها در `artifacts\forecast_cache` ذخیره می‌شوند و اجرای دوباره همان بک‌تست سریع است. |
+| Kronos خیلی کند است | `--n-paths 10`، `--n-origins 8`، `--n-decisions 12`، `--rebalance-every 5`. پیش‌بینی‌ها در `artifacts\forecast_cache` ذخیره می‌شوند (کلید cache شامل مدل، نمونه‌گیری، seed و دقیقاً همان پنجره است). |
 | خطای حافظه در P0 | `--batch-size 5` |
-| `could not fetch ... binance` | شبکه به Binance دسترسی ندارد؛ `KQL_BINANCE_BASE_URL` در `.env.example` یا `data import --csv`. |
+| `could not fetch ...` یا `no Binance market-data host answered` | شبکه به هیچ‌کدام از دو دامنه دسترسی ندارد؛ `KQL_BINANCE_BASE_URL`/`KQL_BINANCE_FALLBACK_URLS` را تنظیم کنید یا از `data import --csv` استفاده کنید. |
 | `gap` هنگام به‌روزرسانی داده | provider کندلی را جا انداخته است؛ چیزی ذخیره نمی‌شود تا سری ناقص وارد پایگاه نشود. |
 | `factor = None` در کالیبراسیون | مبدأ کافی نیست (برای سطح ۰٫۸ حداقل ۴ مبدأ کالیبراسیون)؛ `--n-origins` را زیاد کنید. |
+| `NOT PASSED` در `validate` | برچسب‌های رژیم از تصادف جدا نیستند یا پایدار نیستند؛ آستانه‌های P3 را روی این تاریخچه کالیبره نکنید. تاریخچه بلندتر یا `--forward-window` بزرگ‌تر را امتحان کنید. |
+| `lookback ... exceeds` یا `horizon ... MAX_HORIZON` | سقف‌ها 512 و 96 کندل‌اند؛ مقدار کوچک‌تری بدهید. |
 | `weights missing` | گام P0 ‏(`p0.py models --download --yes`) اجرا نشده است. |
 | `license unknown` | model card مجوزی اعلام نکرده؛ صفحه مدل را بخوانید و فقط در صورت پذیرش `--accept-unknown-license` بدهید. |

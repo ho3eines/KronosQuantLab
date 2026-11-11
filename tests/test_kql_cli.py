@@ -78,3 +78,92 @@ def test_dashboard_renders_in_every_data_state(kql):
     full = render()
     assert any("داده ساختگی" in e.value for e in full.error)  # synthetic data is flagged
     assert {b.label for b in full.button} >= {"تولید پیش‌بینی", "اجرای بک‌تست", "اجرای گام روزانه"}
+
+
+def _store_universe(kql, symbols: int = 4, rows: int = 700) -> None:
+    from app import services
+    from app.data import engine
+
+    conn = services.open_db()
+    for i in range(symbols):
+        engine.store_candles(conn, f"UNI{i}", engine.synthetic_candles(rows, seed=300 + i, end="2026-10-31"), "test")
+    conn.close()
+
+
+def test_settings_and_models_show_the_documented_configuration(kql, capsys):
+    assert kql.main(["settings"]) == 0
+    settings = json.loads(capsys.readouterr().out)
+    assert settings["binance_primary_url"] == "https://data-api.binance.vision"
+    assert settings["binance_fallback_urls"] == ["https://api.binance.com"]
+    assert settings["models"]["small"] == {"model_id": "NeoQuasar/Kronos-small",
+                                           "tokenizer_id": "NeoQuasar/Kronos-Tokenizer-base",
+                                           "parameters": "24.7M", "context_length": 512}
+    assert settings["max_context"] == 512 and settings["max_horizon"] == 96
+    assert settings["lookback"] == 400 and settings["interval"] == "1d"
+    assert kql.main(["models"]) == 0
+    out = capsys.readouterr().out
+    assert "NeoQuasar/Kronos-small" in out and "NeoQuasar/Kronos-Tokenizer-base" in out
+    assert "sample_count=20" in out
+
+
+def test_validate_command_writes_a_report_and_returns_its_verdict(kql, capsys):
+    assert kql.main(["data", "demo", "--rows", "700"]) == 0
+    code = kql.main(["validate", "--symbol", S, "--n-permutations", "8", "--n-bootstrap", "8"])
+    assert code in (0, 1)
+    out = capsys.readouterr().out
+    assert "observed persistence ARI" in out and "thresholds:" in out
+    runs = list(config.REPORTS_DIR.glob("threshold_validation_*"))
+    assert len(runs) == 1 and (runs[0] / "threshold_validation.json").is_file()
+    report = json.loads((runs[0] / "threshold_validation.json").read_text())
+    assert {"passed", "observed_ari", "thresholds", "null", "bootstrap"} <= set(report)
+    # explicit thresholds make the verdict predictable
+    assert kql.main(["validate", "--symbol", S, "--n-permutations", "8", "--n-bootstrap", "8",
+                     "--null-ari-max", "0", "--stability-threshold", "0"]) == 0
+    assert len(list(config.REPORTS_DIR.glob("threshold_validation_*"))) == 2
+
+
+def test_portfolio_command_runs_offline_and_writes_a_run(kql, capsys):
+    _store_universe(kql)
+    code = kql.main(["portfolio", "--symbols", "UNI0", "UNI1", "UNI2", "UNI3", "--n-symbol-hold", "2",
+                     "--n-symbol-drop", "1", "--hold-thresh", "2", "--lookback", "200", "--horizon", "5",
+                     "--n-paths", "5", "--rebalance-every", "20", "--account", "1000000",
+                     "--backtest-n-symbol-hold", "2", "--backtest-n-symbol-drop", "1",
+                     "--time-range", "2026-01-01", "2026-10-31"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "effective hold 2" in out and "SYNTHETIC DATA" not in out and "Historical simulation" in out
+    runs = list(config.REPORTS_DIR.glob("portfolio_*"))
+    assert len(runs) == 1
+    summary = json.loads((runs[0] / "portfolio.json").read_text())
+    assert summary["symbols"] == ["UNI0", "UNI1", "UNI2", "UNI3"]
+    assert summary["config"]["n_symbol_hold"] == 2 and summary["config"]["account"] == 1000000.0
+    assert summary["config"]["time_range"] == ["2026-01-01", "2026-10-31"]
+    assert kql.main(["portfolio", "--symbols", "UNI0", "UNI1", "--start", "2026-01-01", "--end", "2026-02-01",
+                     "--time-range", "2026-01-01", "2026-02-01"]) == 2  # ambiguous range is refused
+    assert summary["effective_hold"] == 2 and summary["metrics"]["strategy"]["n_bars"] > 0
+    assert (runs[0] / "equity.csv").is_file() and (runs[0] / "trades.csv").is_file()
+
+
+def test_interval_workflow_for_intraday_candles(kql, capsys):
+    assert kql.main(["data", "demo", "--rows", "300", "--interval", "1h"]) == 0
+    assert kql.main(["data", "status", "--interval", "1h"]) == 0
+    assert "SYNTH-DEMO" in capsys.readouterr().out
+    assert kql.main(["forecast", "--symbol", S, "--interval", "1h", "--horizon", "4", "--lookback", "200",
+                     "--n-paths", "4"]) == 0
+    out = capsys.readouterr().out
+    assert "(1h)" in out and "lookback 200" in out
+
+
+@pytest.mark.parametrize("argv", [
+    ["forecast", "--symbol", S, "--lookback", "513"],
+    ["forecast", "--symbol", S, "--horizon", "97"],
+    ["forecast", "--symbol", S, "--interval", "5m"],
+    ["forecast", "--symbol", S, "--temperature", "0"],
+    ["forecast", "--symbol", S, "--top-p", "1.5"],
+    ["portfolio", "--symbols", "A", "B", "--account", "-5"],
+])
+def test_window_sampling_and_interval_limits_are_parse_errors(kql, argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        kql.main(argv)
+    assert exc.value.code == 2
+    assert "Traceback" not in capsys.readouterr().err

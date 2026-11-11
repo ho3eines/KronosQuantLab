@@ -13,6 +13,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from app.core.config import MAX_HORIZON
 from app.core.errors import ForecastError, require
 from app.signals.regime import Regime
 
@@ -32,6 +33,7 @@ class SignalParams:
 
     def __post_init__(self) -> None:
         require(self.horizon >= 1, "horizon must be at least 1")
+        require(self.horizon <= MAX_HORIZON, f"horizon must not exceed MAX_HORIZON={MAX_HORIZON}")
         for name in ("min_edge", "max_downside", "target_annual_vol", "max_fraction", "interval_factor"):
             value = getattr(self, name)
             require(math.isfinite(value) and value >= 0, f"{name} must be a non-negative number, got {value}")
