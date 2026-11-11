@@ -56,3 +56,11 @@ class SamplingConfig:
     temperature: float = 1.0
     top_k: int = 0
     top_p: float = 0.9
+
+# --- P1..P5 ------------------------------------------------------------------
+DB_PATH = Path(os.environ.get("KQL_DB_PATH", ARTIFACTS_DIR / "kql.sqlite3"))
+FORECAST_CACHE_DIR = ARTIFACTS_DIR / "forecast_cache"
+INTERVAL = "1d"
+DEFAULT_SYMBOLS: tuple[str, ...] = ("BTCUSDT",)  # test fixture, not a universe decision
+SYNTHETIC_SYMBOL = "SYNTH-DEMO"  # generated random walk; never real market data
+TRADING_DAYS_PER_YEAR = 365  # crypto trades every day

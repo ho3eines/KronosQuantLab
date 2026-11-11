@@ -1,4 +1,4 @@
-# P0 runtime, pinned. Python 3.10 - 3.12 (pandas 2.2.2 has no wheels for 3.13+).
+# Core runtime, pinned. Python 3.11 - 3.12 (pandas 2.2.2 has no wheels for 3.13+; the dashboard needs 3.11+).
 # einops / huggingface_hub / safetensors / tqdm / pandas pins are upstream Kronos' own pins.
 # On Windows the PyPI torch wheel is expected to be the CPU build; `scripts/p0.py`
 # records torch.version.cuda so this is verified rather than assumed.

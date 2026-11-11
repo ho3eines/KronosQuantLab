@@ -23,3 +23,7 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Local database and caches
+artifacts/*.sqlite3*
+artifacts/forecast_cache/
