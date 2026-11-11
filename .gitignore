@@ -1,0 +1,29 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local artifacts: model weights, datasets, raw run outputs
+artifacts/models/
+artifacts/datasets/
+artifacts/reports/*
+!artifacts/reports/.gitkeep
+vendor/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# Local database and caches
+artifacts/*.sqlite3*
+artifacts/forecast_cache/

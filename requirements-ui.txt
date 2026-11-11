@@ -1,0 +1,3 @@
+# Dashboard only (P5). Not needed for the CLI, the tests of the core, or the benchmark.
+streamlit==1.67.0
+plotly==7.1.0
