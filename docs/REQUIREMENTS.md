@@ -81,7 +81,7 @@
 | # | خواسته/تعهد | وضعیت | محل | شاهد |
 |---|---|---|---|---|
 | R25 | فقط پژوهش: بدون حساب، کلید، سفارش | ✅ | کل مخزن؛ `data venues` و README هم صریح | تست خودکار `tests/test_research.py` |
-| R26 | تست خودکار | ✅ | `tests/` (۱۵ فایل) | **۱۸۶ passed، ۱۰ skipped** (۱۹۶ جمع‌آوری‌شده) |
+| R26 | تست خودکار | ✅ | `tests/` (۱۶ فایل) | **۱۹۲ passed، ۱۰ skipped** (۲۰۲ جمع‌آوری‌شده) |
 | R27 | مستندات | ✅ | README، ARCHITECTURE، DECISIONS (D1–D41)، STATUS، CHANGELOG، P0 docs | همین فایل‌ها |
 
 ---

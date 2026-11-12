@@ -20,7 +20,7 @@
 | P3 رژیم، قواعد، کالیبراسیون آستانه | ✅ | 🟡 با داده ساختگی |
 | P4 بک‌تست تک‌دارایی و پرتفوی | ✅ | 🟡 با داده ساختگی |
 | P5 paper و داشبورد | ✅ | 🟡 داشبورد در این محیط اجرا نشده |
-| تست، مستندات | ✅ | ۱۸۶ passed، ۱۰ skipped |
+| تست، مستندات | ✅ | ۱۹۲ passed، ۱۰ skipped |
 | CI، coverage، بسته‌بندی | ⬜ | شروع نشده |
 
 ✅ = کد + تست خودکار · 🟡 = آماده ولی اجرای واقعی/تأیید بیرونی نشده · ⛔ = عمداً خارج از دامنه ·
@@ -31,39 +31,233 @@
 تست‌های آن skip می‌شوند. تا وقتی P0 روی سیستم شما اجرا نشود، برتری Kronos نسبت به روش ساده اثبات
 نشده است؛ P3 تا P5 ابزار پژوهش‌اند، نه استراتژی تأییدشده.
 
-## پیش‌نیاز
+## پیش‌نیازها
 
-- Windows 64-bit، ‏Python **3.11 یا 3.12**، Git
-- حدود 2 GB فضای آزاد برای وزن‌ها و محیط مجازی (تخمین)
-- اینترنت فقط برای نصب، دانلود وزن و دریافت داده
+| مورد | حداقل | توضیح |
+|---|---|---|
+| سیستم‌عامل | Windows 10/11 64-bit | مسیر اصلی همین است؛ Linux و macOS هم پشتیبانی می‌شوند (پایین‌تر) |
+| Python | **3.11 یا 3.12** | نسخه 3.13 پشتیبانی نمی‌شود؛ pandas 2.2.2 برای آن wheel ندارد |
+| Git | 2.30+ | برای clone همین مخزن و مخزن Kronos |
+| PowerShell | 5.1+ | دستورهای زیر برای PowerShell نوشته شده‌اند |
+| فضای دیسک | حدود ۳ GB آزاد | محیط مجازی + وزن‌ها (~0.6 GB) + داده و گزارش‌ها |
+| RAM | ۸ GB پیشنهادی | CPU هم کافی است، فقط کندتر |
+| GPU | اختیاری | CUDA سرعت را زیاد می‌کند، ولی لازم نیست |
+| اینترنت | برای نصب/وزن/داده | اجرای آزمایشی با داده ساختگی بدون اینترنت هم ممکن است |
 
-## نصب (PowerShell، از ریشه مخزن)
+بررسی سریع نسخه‌ها پیش از شروع:
 
 ```powershell
-py scripts\p0_env_probe.py                       # شناسایی محیط؛ چیزی نصب نمی‌کند
+py --version
+git --version
+```
+
+اگر `py` شناخته نشد، Python را از [python.org](https://www.python.org/downloads/) نصب کنید و گزینه
+«Add python.exe to PATH» را بزنید؛ در این حالت از `python` به‌جای `py` استفاده کنید.
+
+## نصب گام‌به‌گام (Windows / PowerShell)
+
+> هیچ‌کدام از این دستورها به حساب صرافی وصل نمی‌شوند و کلید API نمی‌خواهند. نصب فقط کد، کتابخانه و
+> وزن مدل را روی همین دستگاه می‌گذارد.
+
+### ۱) دریافت کد
+
+```powershell
+git clone https://github.com/ho3eines/KronosQuantLab.git
+cd KronosQuantLab
+```
+
+### ۲) بررسی محیط (بدون نصب چیزی)
+
+```powershell
+py scripts\p0_env_probe.py
+```
+
+خروجی می‌گوید Python/Git/دیسک/GPU چه وضعی دارند و در `artifacts\reports\` ذخیره می‌شود.
+
+### ۳) ساخت و فعال‌سازی محیط مجازی
+
+```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python -m pip install --upgrade pip
-.\.venv\Scripts\python -m pip install -r requirements-p0.txt -r requirements-ui.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+```
+
+اگر PowerShell اجازه اجرای اسکریپت نداد:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\.venv\Scripts\Activate.ps1
+```
+
+از این به بعد `python` به محیط مجازی اشاره می‌کند. اگر نمی‌خواهید فعال کنید، همه‌جا
+`.\.venv\Scripts\python` بنویسید.
+
+### ۴) نصب وابستگی‌ها
+
+```powershell
+python -m pip install -r requirements-p0.txt -r requirements-ui.txt
+```
+
+- `requirements-p0.txt`: هسته (numpy/pandas/torch/وابستگی‌های Kronos) + pytest.
+- `requirements-ui.txt`: فقط داشبورد (Streamlit/Plotly). اگر فقط CLI می‌خواهید، این یکی را نصب نکنید.
+- نصب torch بزرگ است و چند دقیقه طول می‌کشد. روی ویندوز wheel پیش‌فرض PyPI نسخه CPU است. اگر کارت
+  NVIDIA دارید و CUDA می‌خواهید، **قبل** از دستور بالا:
+  ```powershell
+  python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu126
+  ```
+
+### ۵) کد Kronos در commit pin‌شده
+
+```powershell
 git clone https://github.com/shiyu-coder/Kronos.git vendor\Kronos
 git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
-.\.venv\Scripts\python -m pytest -q               # بدون اینترنت و بدون وزن مدل
 ```
 
-## گام اول: P0 (پیش از هر چیز دیگر)
+این پوشه در `.gitignore` است و وزن‌ها داخلش نیست؛ فقط کد مدل است.
+
+### ۶) تست نصب (بدون اینترنت و بدون وزن)
 
 ```powershell
-.\.venv\Scripts\python scripts\p0.py models                    # مجوز، حجم، شناسه مدل و توکنایزر؛ دانلود نمی‌کند
-.\.venv\Scripts\python scripts\p0.py models --download --yes
-.\.venv\Scripts\python scripts\p0.py data
-.\.venv\Scripts\python scripts\p0.py benchmark --smoke         # ۱ مسیر، افق ۷
-.\.venv\Scripts\python scripts\p0.py benchmark                 # ۱ ← ۵ ← ۲۰ مسیر
-.\.venv\Scripts\python scripts\p0.py evaluate                  # دقت در برابر naive
-.\.venv\Scripts\python scripts\p0.py report                    # docs\P0_model_benchmark.md
+python -m pytest -q
+python scripts\kql.py settings
+python scripts\kql.py models
 ```
+
+انتظار: **هیچ تست `failed` نداشته باشید**. تعداد `skipped` به نصب بودن torch/Streamlit و وزن‌ها بستگی
+دارد؛ روی نصب کامل، عددها بیشتر از «192 passed, 10 skipped» است. در `kql.py models`، `baseline-bootstrap` باید available باشد و
+`kronos-small/base` تا زمانی که وزن دانلود نشود «NOT available» نشان می‌دهند؛ این طبیعی است و یعنی
+نصب سالم است.
+
+### ۷) تنظیمات محلی (`.env`)
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+- پروژه هنگام import، فایل `.env` ریشه مخزن را می‌خواند و فقط کلیدهای `KQL_*` را اعمال می‌کند.
+- اگر همان متغیر در محیط واقعی تنظیم شده باشد، **مقدار محیط بر فایل اولویت دارد**.
+- `.env` در `.gitignore` است و نباید هیچ کلید/رمزی داشته باشد (این پروژه به کلید نیاز ندارد).
+- برای یک اجرای موقت بدون فایل:
+  ```powershell
+  $env:KQL_ARTIFACTS_DIR = "D:\kql_artifacts"
+  python scripts\kql.py settings
+  ```
+  این متغیر فقط در همین پنجره PowerShell معتبر است. مسیر فایل دیگر: `$env:KQL_ENV_FILE = "D:\kql\.env"`.
+
+### ۸) اولین اجرای آزمایشی (بدون اینترنت و بدون وزن مدل)
+
+```powershell
+python scripts\kql.py data demo --rows 900
+python scripts\kql.py forecast --symbol SYNTH-DEMO --model baseline-bootstrap --horizon 10 --sample-count 10
+python scripts\kql.py backtest --symbol SYNTH-DEMO --model baseline-bootstrap --n-paths 10 --n-decisions 3 --rebalance-every 60
+python scripts\kql.py paper init
+python scripts\kql.py paper step --symbol SYNTH-DEMO --model baseline-bootstrap
+python scripts\kql.py paper status
+```
+
+`SYNTH-DEMO` داده **ساختگی** است؛ فقط برای اطمینان از سالم بودن نصب. اعدادش هیچ معنای بازاری ندارند.
+
+### ۹) دانلود وزن‌های Kronos (اختیاری، لازم برای مدل واقعی)
+
+```powershell
+python scripts\p0.py models                       # مجوز/حجم/commit؛ چیزی دانلود نمی‌کند
+python scripts\p0.py models --download --yes
+```
+
+- اگر model card مجوز اعلام نکرده باشد دانلود رد می‌شود؛ پس از خواندن صفحه مدل
+  `--accept-unknown-license` را اضافه کنید.
+- حجم تقریبی مجموع: حدود 0.6 GB، در `artifacts\models\`.
+- بعد از دانلود، `python scripts\kql.py models` باید `kronos-small` و `kronos-base` را available ببیند.
+
+### ۱۰) داده واقعی بازار
+
+```powershell
+python scripts\p0.py data                        # نمونه BTCUSDT روزانه + اعتبارسنجی
+python scripts\kql.py data update --symbols BTCUSDT ETHUSDT --interval 1d
+python scripts\kql.py data status --interval 1d
+```
+
+اگر دامنه‌های Binance مسدود بودند پیام روشن می‌دهد؛ جایگزین: `data import --csv` یا
+`data update --symbols NOBITEX:BTCIRT` (عمومی و بدون توکن). خروجی MT5 آلپاری هم با
+`data import --format mt5` وارد می‌شود.
+
+### ۱۱) اجرای داشبورد
+
+```powershell
+python -m streamlit run app\ui\dashboard.py
+```
+
+مرورگر روی `http://localhost:8501` باز می‌شود. اگر پورت اشغال بود:
+`python -m streamlit run app\ui\dashboard.py --server.port 8502`.
+
+## بررسی سلامت نصب
+
+| بررسی | دستور | نتیجه سالم |
+|---|---|---|
+| تست‌ها | `python -m pytest -q` | بدون `failed` (skipped وابسته به torch/Streamlit/وزن است) |
+| تنظیمات | `python scripts\kql.py settings` | JSON با `interval`، `models`، `venues` |
+| مدل‌ها | `python scripts\kql.py models` | baseline available؛ Kronos بعد از دانلود weight |
+| دیتابیس | `python scripts\kql.py data status` | ساخت جدول‌ها بدون خطا (حتی اگر خالی باشد) |
+| پیش‌بینی | `python scripts\kql.py forecast --symbol SYNTH-DEMO --model baseline-bootstrap` | جدول P10/P50/P90 و شماره run |
+| داشبورد | `python -m streamlit run app\ui\dashboard.py` | صفحه روی پورت 8501 |
+
+## به‌روزرسانی، نسخه پشتیبان و حذف
+
+```powershell
+# به‌روزرسانی کد و وابستگی‌ها
+git pull
+python -m pip install -r requirements-p0.txt -r requirements-ui.txt
+python -m pytest -q
+
+# ارتقای commit مدل، فقط در صورت نیاز
+git -C vendor\Kronos fetch
+git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
+```
+
+- **پشتیبان:** `artifacts\` (دیتابیس `kql.sqlite3`، وزن‌ها، گزارش‌ها) و فایل `.env` را کپی کنید.
+  داده و گزارش‌ها در Git نیستند و با `git pull` پاک نمی‌شوند.
+- **بازنشانی دیتابیس:** فقط فایل `artifacts\kql.sqlite3` را (پس از پشتیبان) حذف کنید؛ با اجرای بعدی
+  دوباره ساخته می‌شود.
+- **حذف کامل:** `.venv`، `vendor\Kronos` و `artifacts\` را حذف کنید. **قبل از حذف `artifacts`**
+  از وزن‌ها و گزارش‌ها نسخه پشتیبان بگیرید.
+
+## نصب روی Linux / macOS
+
+```bash
+git clone https://github.com/ho3eines/KronosQuantLab.git
+cd KronosQuantLab
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-p0.txt -r requirements-ui.txt
+git clone https://github.com/shiyu-coder/Kronos.git vendor/Kronos
+git -C vendor/Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
+python -m pytest -q
+export KQL_ARTIFACTS_DIR="$HOME/kql_artifacts"   # اختیاری؛ یا از .env استفاده کنید
+python scripts/kql.py settings
+```
+
+## خطاهای رایج نصب
+
+| نشانه | علت و راه‌حل |
+|---|---|
+| `py` شناخته نمی‌شود | Python در PATH نیست؛ نصب مجدد با گزینه Add to PATH، یا از `python` استفاده کنید. |
+| `Activate.ps1 cannot be loaded` | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` و دوباره فعال کنید. |
+| خطای build برای pandas/numpy | نسخه Python اشتباه است؛ 3.11 یا 3.12 نصب کنید (نه 3.13). |
+| نصب torch خیلی طول می‌کشد/حجم زیاد | طبیعی است؛ برای CPU همان دستور requirements کافی است. |
+| `Kronos source not found` | پوشه `vendor/Kronos` ساخته نشده یا commit اشتباه است؛ گام ۵ را تکرار کنید. |
+| `weights not found in ...` | گام ۹ (دانلود وزن) اجرا نشده است. |
+| `license unknown` | model card مجوز ندارد؛ صفحه مدل را بخوانید و با `--accept-unknown-license` تأیید کنید. |
+| `could not fetch ...` یا `no Binance market-data host answered` | شبکه/فیلترینگ؛ `KQL_BINANCE_*` را تنظیم کنید یا از `data import --csv` / `NOBITEX:` استفاده کنید. |
+| `streamlit: command not found` | `requirements-ui.txt` نصب نشده یا venv فعال نیست. |
+| پورت 8501 اشغال است | `--server.port 8502`. |
+| متن فارسی در کنسول به‌هم‌ریخته | `chcp 65001` یا از داشبورد استفاده کنید. |
+| `database is locked` | داشبورد یا پردازه دیگری دیتابیس را باز نگه داشته؛ آن را ببندید و دوباره اجرا کنید. |
 
 ## تنظیمات (همه غیرمحرمانه)
 
-همه مقادیر از متغیر محیطی خوانده می‌شوند (نمونه در `.env.example`). برای دیدن مقدار مؤثر:
+همه مقادیر از متغیر محیطی یا فایل `.env` خوانده می‌شوند (نمونه در `.env.example`). برای دیدن مقدار مؤثر:
 
 ```powershell
 .\.venv\Scripts\python scripts\kql.py settings
@@ -85,7 +279,7 @@ git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 | small | `NeoQuasar/Kronos-small` | `NeoQuasar/Kronos-Tokenizer-base` | حدود 24.7M | 512 |
 | base | `NeoQuasar/Kronos-base` | `NeoQuasar/Kronos-Tokenizer-base` | حدود 102.3M | 512 |
 
-دانلود فقط با `p0.py models --download --yes` انجام می‌شود و مجوز model card پیش از دانلود نشان داده می‌شود. هیچ شناسه‌ای در کد جاسازی نشده تا با `.env` یا نسخه‌های آینده از هم جدا بماند؛ شناسه‌ها در `app/core/config.py` تعریف و با `kql.py models` نمایش داده می‌شوند.
+دانلود فقط با `p0.py models --download --yes` انجام می‌شود و مجوز model card پیش از دانلود نشان داده می‌شود؛ اگر مجوز اعلام نشده باشد، تأیید صریح `--accept-unknown-license` لازم است. شناسه‌ها در `app/core/config.py` تعریف شده‌اند و با `kql.py models` نمایش داده می‌شوند.
 
 ### ۳) آستانه‌های تصمیم (P3)
 

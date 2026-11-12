@@ -1,6 +1,8 @@
 """Central configuration. No secrets live here; nothing here talks to a broker.
 
-Every value can be overridden from the process environment (see ``.env.example``).
+Every value can be overridden from the process environment.  A local ``.env``
+file (``KQL_ENV_FILE`` overrides its path) is read once at import; an environment
+variable that is already set always wins.  See ``.env.example``.
 Nothing in this project needs an API key: the market-data hosts below serve public
 candles only.
 """
@@ -12,9 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core import timeframes, venues
+from app.core.envfile import load_env_file
 from app.core.errors import ConfigError, require
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = Path(os.environ.get("KQL_ENV_FILE", REPO_ROOT / ".env"))
+load_env_file(ENV_FILE)  # KQL_* only; existing environment variables win
 ARTIFACTS_DIR = Path(os.environ.get("KQL_ARTIFACTS_DIR", REPO_ROOT / "artifacts"))
 MODELS_DIR = ARTIFACTS_DIR / "models"
 DATASETS_DIR = ARTIFACTS_DIR / "datasets"
@@ -248,5 +253,6 @@ def effective_settings() -> dict[str, object]:
             "hold_thresh": PORTFOLIO_DEFAULTS.hold_thresh,
             "account": PORTFOLIO_DEFAULTS.account,
         },
-        "paths": {"artifacts": str(ARTIFACTS_DIR), "db": str(DB_PATH), "kronos_src": str(KRONOS_SRC_DIR)},
+        "paths": {"artifacts": str(ARTIFACTS_DIR), "db": str(DB_PATH), "kronos_src": str(KRONOS_SRC_DIR),
+                  "env_file": str(ENV_FILE), "env_file_exists": ENV_FILE.is_file()},
     }

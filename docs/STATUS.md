@@ -31,7 +31,7 @@
   ندارد و وزن‌های Kronos نیز دانلود نشده‌اند. همه اجراها با داده ساختگی و مدل پایه داخلی انجام شده‌اند.
 - P0 (مقایسه Kronos-small و Kronos-base) هنوز **اجرا نشده**؛ تا آن زمان معلوم نیست Kronos از روش
   ساده بهتر است یا نه.
-- وضعیت تست: **۱۸۶ passed، ۱۰ skipped** (۱۹۶ تست جمع‌آوری‌شده)؛ `ruff --select F,E9` و `mypy` پاک.
+- وضعیت تست: **۱۹۲ passed، ۱۰ skipped** (۲۰۲ تست جمع‌آوری‌شده)؛ `ruff --select F,E9` و `mypy` پاک.
 
 ---
 
@@ -113,7 +113,7 @@
 
 ### ۳.۵ مستندات
 
-- `README.md` — نصب، تنظیمات، دستورها، تفاوت Binance/Nobitex/Alpari، قواعد زمانی.
+- `README.md` — نصب گام‌به‌گام (Windows/Linux)، `.env`، سلامت نصب، عیب‌یابی، تنظیمات، صرافی‌ها و قواعد زمانی.
 - `docs/ARCHITECTURE.md` — نقشه ماژول‌ها، جریان داده، قراردادها و محدودیت‌ها.
 - `docs/DECISIONS.md` — ۴۱ تصمیم ثبت‌شده (D1–D41) با دلیل و وضعیت.
 - `docs/P0_plan.md`، `docs/P0_environment_report.md`، `docs/P0_model_benchmark.md` — وضعیت P0.
@@ -145,7 +145,7 @@
 
 ## ۵. شواهد تست
 
-`python -m pytest -q` → **۱۸۶ passed، ۱۰ skipped** (۱۹۶ جمع‌آوری‌شده). ۱۰ تست skip
+`python -m pytest -q` → **۱۹۲ passed، ۱۰ skipped** (۲۰۲ جمع‌آوری‌شده). ۱۰ تست skip
 وابسته به torch/وزن‌های واقعی/شبکه‌اند.
 
 | فایل | تعداد | پوشش موضوعی |
@@ -165,6 +165,7 @@
 | `tests/test_cli.py` | ۸ | CLI پایه |
 | `tests/test_venues.py` | ۷ | فضای نام، تقویم، سالانه‌سازی، مسیردهی provider |
 | `tests/test_metrics.py` | ۵ | معیارهای عددی |
+| `tests/test_envfile.py` | ۶ | پارس `.env`، اولویت متغیر محیطی، اتصال به config |
 
 کیفیت کد: `ruff check app scripts tests --select F,E9` و
 `mypy app scripts/kql.py scripts/p0.py --ignore-missing-imports` هر دو پاک‌اند؛ `compileall` هم
