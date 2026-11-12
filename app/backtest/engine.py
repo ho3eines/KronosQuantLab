@@ -37,6 +37,8 @@ class BacktestConfig:
     initial_cash: float = 10_000.0
     seed: int = 20260101
     interval: str = config.INTERVAL
+    calendar: str = "24/7"
+    bars_per_year: float | None = None  # venue calendar (252 for FX, 365 for 24/7)
     costs: Costs = Costs()
 
     def __post_init__(self) -> None:
@@ -46,6 +48,8 @@ class BacktestConfig:
         require(self.n_paths >= 2, "n_paths must be at least 2 (quantiles need several paths)")
         require(math.isfinite(self.initial_cash) and self.initial_cash > 0, "initial_cash must be positive")
         timeframes.normalize(self.interval)
+        require(self.calendar in ("24/7", "fx"), f"unknown calendar '{self.calendar}'")
+        require(self.bars_per_year is None or self.bars_per_year > 0, "bars_per_year must be positive")
 
 
 @dataclass
@@ -90,6 +94,7 @@ def run_backtest(
     min_history = max(regime_params.min_bars, 30)
     decide_on = decision_indices(len(df), cfg, min_history)
     start = decide_on[0] + 1  # first bar on which anything can be executed
+    bpy = float(cfg.bars_per_year or timeframes.bars_per_year(cfg.interval))
     cash, qty = cfg.initial_cash, 0.0
     bh_fill = rebalance(cfg.initial_cash, 0.0, float(df["open"].iloc[start]), 1.0, cfg.costs)
     pending: float | None = None
@@ -100,7 +105,8 @@ def run_backtest(
     def make_decision(t: int) -> float | None:
         try:
             ctx = decide_at(df, t, forecaster, params, cfg.lookback, cfg.n_paths, cfg.seed, regime_params,
-                            interval=cfg.interval)
+                            interval=cfg.interval, calendar=cfg.calendar,
+                            bars_per_year=bpy)
         except KQLError as exc:  # a failed forecast means "do nothing", never a crash
             log.error("decision at row %d failed: %s", t, exc)
             errors.append({"row": t, "timestamp": str(df["timestamp"].iloc[t]), "error": str(exc)})
@@ -131,8 +137,7 @@ def run_backtest(
     eq = pd.DataFrame(rows)
     base = np.concatenate([[cfg.initial_cash], eq["equity"].to_numpy()])
     bh = np.concatenate([[cfg.initial_cash], eq["buy_hold"].to_numpy()])
-    strat: dict[str, Any] = performance(base, timeframes.bars_per_year(cfg.interval))
-    bpy = timeframes.bars_per_year(cfg.interval)
+    strat: dict[str, Any] = performance(base, bpy)
     strat.update(n_trades=len(trades), fees_paid=fees, mean_exposure=float(eq["position_fraction"].mean()),
                  n_decisions=len(decisions), n_failed_decisions=len(errors), n_bars=len(eq))
     return BacktestResult(eq, decisions, trades, {

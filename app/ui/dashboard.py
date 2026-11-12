@@ -105,18 +105,20 @@ with tabs[0]:
         st.dataframe(pd.DataFrame(status), hide_index=True, width="stretch")
     else:
         st.info("پایگاه داده برای این بازه خالی است. از تب «داده» شروع کنید.")
-    st.caption(f"SQLite: {config.DB_PATH} · Binance: {' → '.join(config.BINANCE_BASE_URLS)}")
+    st.caption(f"SQLite: {config.DB_PATH} · Binance: {' → '.join(config.BINANCE_BASE_URLS)} · "
+               f"Nobitex: {config.NOBITEX_BASE_URL}")
 
 with tabs[1]:
     c1, c2 = st.columns(2)
     with c1:
-        text = st.text_input("نمادها برای به‌روزرسانی از Binance (با فاصله)", " ".join(config.DEFAULT_SYMBOLS))
+        text = st.text_input("نمادها (Binance یا NOBITEX:... با فاصله)", " ".join(config.DEFAULT_SYMBOLS))
         if st.button("به‌روزرسانی داده"):
             for s in text.split():
                 out = guarded(f"دریافت {s}", lambda s=s: engine.update_symbol(
-                    conn, engine.BinanceProvider(interval=interval), s))
+                    conn, engine.provider_for(s, interval=interval), s))
                 if out:
                     st.success(f"{s}: {out['inserted']} کندل جدید، آخرین {out['last'][:10]}")
+        st.caption("آلپاری API عمومی ندارد: خروجی MT5 را با «data import --format mt5» وارد کنید.")
     with c2:
         st.write("بدون اینترنت: یک سری **ساختگی** برای آزمایش رابط")
         if st.button("بارگذاری داده ساختگی"):

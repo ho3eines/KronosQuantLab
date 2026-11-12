@@ -198,4 +198,4 @@ def test_config_dict_is_plain_json():
     cfg = PortfolioConfig(time_range=("2024-01-01", "2024-06-01"))
     out = config_dict(cfg)
     assert out["time_range"] == ["2024-01-01", "2024-06-01"]
-    assert out["n_symbol_hold"] == cfg.n_symbol_hold and out["bars_per_year"] == cfg.bars_per_year
+    assert out["n_symbol_hold"] == cfg.n_symbol_hold and out["bars_per_year"] == cfg.annualisation

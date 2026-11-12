@@ -7,6 +7,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from app.core import venues
 from app.core.config import FEATURE_COLUMNS, MAX_CONTEXT, MAX_HORIZON
 from app.core.errors import DataValidationError, ForecastError
 
@@ -48,13 +49,18 @@ def infer_step(timestamps: pd.Series) -> pd.Timedelta:
 
 
 def make_window(
-    df: pd.DataFrame, origin: int, lookback: int, horizon: int, freq: str | None = None
+    df: pd.DataFrame, origin: int, lookback: int, horizon: int, freq: str | None = None,
+    calendar: str = "24/7",
 ) -> Window:
     """Context = rows ``[origin-lookback, origin)``; targets = rows ``[origin, origin+horizon)``.
 
     ``origin == len(df)`` is allowed (true out-of-sample forecast, ``actual=None``).
     ``freq=None`` infers the candle step from the context timestamps, so hourly,
     4-hour and daily data all work without threading the interval through.
+
+    ``calendar="fx"`` allows weekend/holiday holes and forecasts the next *session*
+    bars (a Friday forecast points at Monday), while ``"24/7"`` stays exactly
+    contiguous.
     """
     if lookback <= 0 or horizon <= 0:
         raise DataValidationError("lookback and horizon must be positive")
@@ -67,16 +73,25 @@ def make_window(
     context = df.iloc[origin - lookback: origin].reset_index(drop=True)
     ts = pd.to_datetime(context["timestamp"], utc=True)
     step = pd.Timedelta(freq) if freq is not None else infer_step(ts)
-    if not (ts.diff().dropna() == step).all():
+    if not venues.session_deltas_ok(ts.diff().dropna(), step, calendar):
         raise DataValidationError("context window is not contiguous and strictly increasing")
     if context[list(FEATURE_COLUMNS)].isnull().values.any():
         raise DataValidationError("context window contains nulls")
-    future = pd.Series(pd.date_range(ts.iloc[-1] + step, periods=horizon, freq=step))
     actual = None
     if origin + horizon <= len(df):
         actual = df.iloc[origin: origin + horizon].reset_index(drop=True)
-        if not (pd.to_datetime(actual["timestamp"], utc=True).reset_index(drop=True) == future).all():
-            raise DataValidationError("target window does not line up with forecast timestamps")
+        target_ts = pd.to_datetime(actual["timestamp"], utc=True).reset_index(drop=True)
+        if calendar == "24/7":
+            expected = pd.Series(pd.date_range(ts.iloc[-1] + step, periods=horizon, freq=step))
+            if not (target_ts == expected).all():
+                raise DataValidationError("target window does not line up with forecast timestamps")
+        else:
+            deltas = target_ts.diff().dropna()
+            if target_ts.iloc[0] <= ts.iloc[-1] or not venues.session_deltas_ok(deltas, step, calendar):
+                raise DataValidationError("target window does not line up with the venue calendar")
+        future = pd.Series(target_ts)
+    else:
+        future = pd.Series(venues.future_timestamps(ts.iloc[-1], horizon, step, calendar))
     return Window(context=context, future_ts=to_naive_utc(future), actual=actual)
 
 

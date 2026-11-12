@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.core import timeframes
+from app.core import timeframes, venues
 from app.core.errors import ConfigError, require
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -67,6 +67,17 @@ BINANCE_FALLBACK_URLS = _url_list(
 BINANCE_BASE_URLS = tuple(dict.fromkeys((BINANCE_PRIMARY_URL, *BINANCE_FALLBACK_URLS)))
 BINANCE_BASE_URL = BINANCE_BASE_URLS[0]  # backward-compatible alias: the primary host
 BINANCE_GEO_BLOCK_STATUS = (451, 403)  # 451: legal/geographic block; 403: WAF geo refusal
+
+# --- Nobitex: public OHLC, no token, no account ------------------------------------
+# Docs: GET {base}/market/udf/history (max 500 candles per response, UDF JSON).
+NOBITEX_BASE_URL = os.environ.get("KQL_NOBITEX_BASE_URL", "https://apiv2.nobitex.ir").strip().rstrip("/")
+NOBITEX_TIMEOUT = _env_float("KQL_NOBITEX_TIMEOUT", 30.0)
+NOBITEX_REQUEST_INTERVAL = _env_float("KQL_NOBITEX_REQUEST_INTERVAL", 1.0)  # seconds between pages
+NOBITEX_RETRIES = _env_int("KQL_NOBITEX_RETRIES", 3)
+NOBITEX_HISTORY_START = os.environ.get("KQL_NOBITEX_HISTORY_START", "2019-01-01").strip() or "2019-01-01"
+require(NOBITEX_TIMEOUT > 0, "KQL_NOBITEX_TIMEOUT must be positive")
+require(NOBITEX_REQUEST_INTERVAL >= 0, "KQL_NOBITEX_REQUEST_INTERVAL must not be negative")
+require(NOBITEX_RETRIES >= 1, "KQL_NOBITEX_RETRIES must be at least 1")
 
 # --- Columns and model window limits -----------------------------------------
 # Column order of Kronos input and output (verified in upstream model/kronos.py).
@@ -159,6 +170,11 @@ DEFAULT_SYMBOLS: tuple[str, ...] = ("BTCUSDT",)  # test fixture, not a universe 
 SYNTHETIC_SYMBOL = "SYNTH-DEMO"  # generated random walk; never real market data
 
 
+def bars_per_year(interval: str | None = None, symbol: str | None = None) -> float:
+    """Annualisation factor for a bar series, honouring the venue's calendar (365 vs 252 days)."""
+    return venues.bars_per_year(interval or INTERVAL, symbol)
+
+
 @dataclass(frozen=True)
 class PortfolioDefaults:
     """Defaults of the Qlib-style cross-sectional simulator (see ``app/backtest/portfolio.py``)."""
@@ -210,6 +226,15 @@ def effective_settings() -> dict[str, object]:
             for key, spec in MODELS.items()
         },
         "tokenizer": {"tokenizer_id": TOKENIZER.repo_id},
+        "venues": venues.describe(),
+        "nobitex": {
+            "base_url": NOBITEX_BASE_URL,
+            "intervals": {"1h": "60", "4h": "240", "1d": "D"},
+            "request_interval_seconds": NOBITEX_REQUEST_INTERVAL,
+            "retries": NOBITEX_RETRIES,
+            "history_start": NOBITEX_HISTORY_START,
+            "auth": "none (public OHLC only)",
+        },
         "validation_defaults": {
             "validation_alpha": VALIDATION_ALPHA,
             "validation_null_ari_max": VALIDATION_NULL_ARI_MAX,

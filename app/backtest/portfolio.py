@@ -49,6 +49,8 @@ class PortfolioConfig:
     n_paths: int = config.DEFAULT_SAMPLE_COUNT
     rebalance_every: int = 1
     interval: str = config.INTERVAL
+    calendar: str = "24/7"  # all symbols of one portfolio share a venue calendar
+    bars_per_year: float | None = None
     time_range: tuple[str | None, str | None] = (None, None)
     seed: int = 20260101
     costs: Costs = field(default_factory=Costs)
@@ -64,6 +66,8 @@ class PortfolioConfig:
         require(self.rebalance_every >= 1, "rebalance_every must be at least 1")
         require(math.isfinite(self.initial_cash) and self.initial_cash > 0, "initial_cash must be positive")
         timeframes.normalize(self.interval)
+        require(self.calendar in ("24/7", "fx"), f"unknown calendar '{self.calendar}'")
+        require(self.bars_per_year is None or self.bars_per_year > 0, "bars_per_year must be positive")
         start, end = self.start, self.end
         if start is not None and end is not None:
             require(start < end, "time_range start must be before end")
@@ -86,8 +90,8 @@ class PortfolioConfig:
         return self._stamp(self.time_range[1])
 
     @property
-    def bars_per_year(self) -> float:
-        return timeframes.bars_per_year(self.interval)
+    def annualisation(self) -> float:
+        return float(self.bars_per_year or timeframes.bars_per_year(self.interval))
 
 
 @dataclass(frozen=True)
@@ -221,7 +225,8 @@ def score_symbols(
     for symbol, frame in frames.items():
         past = frame.iloc[: t + 1]
         try:
-            fc = make_forecast(past, forecaster, cfg.lookback, cfg.horizon, cfg.n_paths, cfg.seed)
+            fc = make_forecast(past, forecaster, cfg.lookback, cfg.horizon, cfg.n_paths, cfg.seed,
+                               interval=cfg.interval, calendar=cfg.calendar)
             scores[symbol] = float(fc.p50[-1]) / fc.last_close - 1.0
         except KQLError as exc:  # one failing symbol must not stop the portfolio
             log.error("%s: forecast at %s failed: %s", symbol, decision_ts, exc)
@@ -280,7 +285,7 @@ def run_portfolio_backtest(
         )
     decide_on = set(range(first_decision, last_exclusive - 1, cfg.rebalance_every))
     first_exec = min(decide_on) + 1
-    bars_per_year = cfg.bars_per_year
+    bars_per_year = cfg.annualisation
     effective_hold = min(cfg.n_symbol_hold, len(frames))
 
     cash: float = float(cfg.initial_cash)
@@ -373,5 +378,5 @@ def config_dict(cfg: PortfolioConfig) -> dict[str, Any]:
     out = asdict(cfg)
     out["time_range"] = [cfg.time_range[0], cfg.time_range[1]]
     out["account"] = cfg.initial_cash  # the documented name of the initial portfolio value
-    out["bars_per_year"] = cfg.bars_per_year
+    out["bars_per_year"] = cfg.annualisation
     return out

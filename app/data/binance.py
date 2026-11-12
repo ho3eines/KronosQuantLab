@@ -12,11 +12,9 @@ process so later symbols do not pay the failed attempt again.
 """
 from __future__ import annotations
 
-import json
 import logging
 import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -24,6 +22,7 @@ import pandas as pd
 
 from app.core import config
 from app.core.errors import DataValidationError
+from app.data import http
 
 log = logging.getLogger(__name__)
 
@@ -74,9 +73,7 @@ def endpoint_candidates(base_urls: str | Sequence[str] | None = None) -> list[st
 
 
 def _http_get_json(url: str) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": "KronosQuantLab-research"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - fixed https host
-        return json.loads(resp.read().decode("utf-8"))
+    return http.get_json(url, timeout=30)
 
 
 def _klines_url(base_url: str, symbol: str, interval: str, start_ms: int) -> str:

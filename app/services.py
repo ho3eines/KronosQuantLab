@@ -14,7 +14,8 @@ import pandas as pd
 from app.backtest.engine import BacktestConfig, BacktestResult, config_dict, decision_indices, run_backtest
 from app.backtest.portfolio import PortfolioConfig, PortfolioResult, config_dict as portfolio_config_dict
 from app.backtest.portfolio import run_portfolio_backtest
-from app.core import config, timeframes
+from app.core import config, timeframes, venues
+from app.core.errors import KQLError
 from app.core.runs import new_run_dir, utc_now, write_json_new
 from app.data import engine
 from app.evaluation.calibration import calibrate_split
@@ -52,7 +53,7 @@ def forecast_now(conn: sqlite3.Connection, symbol: str, model: str, horizon: int
     interval = _interval(interval)
     df = engine.load_candles(conn, symbol, interval)
     fc = make_forecast(df, get_forecaster(model, device, sampling=sampling), lookback, horizon, n_paths,
-                       interval=interval)
+                       interval=interval, calendar=venues.calendar_of(symbol))
     return fc, save_forecast(conn, symbol, fc, interval, sampling)
 
 
@@ -61,6 +62,7 @@ def calibrate(conn: sqlite3.Connection, symbol: str, model: str, cfg: EvalConfig
               sampling: config.SamplingConfig | None = None) -> dict[str, Any]:
     """Rolling-origin forecasts on stored data, accuracy vs naive, and split-conformal calibration."""
     df = engine.load_candles(conn, symbol, cfg.interval)
+    cfg = dataclasses.replace(cfg, calendar=venues.calendar_of(symbol))
     res = run_forecasts(df, get_forecaster(model, device, sampling=sampling), cfg)
     rows = calibrate_split(res["paths"], res["actual"], cfg.horizons, calib_fraction, level)
     for row in rows:  # last bar whose realised value went into the factor (for look-ahead checks)
@@ -155,6 +157,8 @@ def backtest(conn: sqlite3.Connection, symbol: str, model: str, params: SignalPa
              factor_source: str = "", device: str = "cpu",
              sampling: config.SamplingConfig | None = None) -> tuple[BacktestResult, dict[str, Any]]:
     df = engine.load_candles(conn, symbol, cfg.interval)
+    cfg = dataclasses.replace(cfg, calendar=venues.calendar_of(symbol),
+                              bars_per_year=config.bars_per_year(cfg.interval, symbol))
     res = run_backtest(df, get_forecaster(model, device, sampling=sampling), params, cfg)
     summary = {
         "kind": "backtest", "created_utc": utc_now().isoformat(), "symbol": symbol, "model": model,
@@ -181,7 +185,8 @@ def paper_step(conn: sqlite3.Connection, symbol: str, model: str, n_paths: int =
     df = engine.load_candles(conn, symbol, interval)
     params, source = signal_params(symbol, model, interval=interval)
     out = simulator.step(conn, symbol, df, get_forecaster(model, device, sampling=sampling), params, lookback,
-                         n_paths, interval=interval)
+                         n_paths, interval=interval, calendar=venues.calendar_of(symbol),
+                         bars_per_year=config.bars_per_year(interval, symbol))
     out["interval_factor_source"] = source
     out["sampling"] = (sampling or config.SamplingConfig()).as_plain()
     stale = pd.Timestamp.now(tz="UTC") - pd.Timestamp(df["timestamp"].iloc[-1])
@@ -212,7 +217,8 @@ def validate_thresholds(
     interval = _interval(interval or params.interval)
     params = dataclasses.replace(params, interval=interval)
     df = engine.load_candles(conn, symbol, interval)
-    report = calibrate_thresholds(df["close"], params)
+    report = calibrate_thresholds(df["close"], params,
+                                  bars_per_year=config.bars_per_year(interval, symbol))
     out: dict[str, Any] = {
         "kind": "threshold_validation", "created_utc": utc_now().isoformat(), "symbol": symbol,
         "synthetic_data": symbol == config.SYNTHETIC_SYMBOL,
@@ -237,6 +243,14 @@ def portfolio_backtest(
     device: str = "cpu", sampling: config.SamplingConfig | None = None,
 ) -> tuple[PortfolioResult, dict[str, Any]]:
     """Qlib-style cross-sectional backtest over the stored symbols."""
+    venue_names = sorted({venues.venue_name(s) for s in symbols})
+    if len(venue_names) > 1:
+        raise KQLError(
+            "all portfolio symbols must belong to one venue so that the calendar and annualisation are "
+            f"well defined; got {venue_names}"
+        )
+    cfg = dataclasses.replace(cfg, calendar=venues.calendar_of(symbols[0]),
+                              bars_per_year=config.bars_per_year(cfg.interval, symbols[0]))
     data = {s: engine.load_candles(conn, s, cfg.interval) for s in symbols}
     res = run_portfolio_backtest(data, get_forecaster(model, device, sampling=sampling), cfg)
     summary = {

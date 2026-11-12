@@ -27,6 +27,7 @@ class EvalConfig:
     n_paths: int = 20
     seed: int = 20260101
     interval: str = config.INTERVAL
+    calendar: str = "24/7"
 
     def __post_init__(self) -> None:
         require(len(self.horizons) > 0 and all(h >= 1 for h in self.horizons), "horizons must be positive")
@@ -36,6 +37,7 @@ class EvalConfig:
             require(getattr(self, name) >= 1, f"{name} must be at least 1")
         require(self.lookback <= config.MAX_CONTEXT, f"lookback must not exceed {config.MAX_CONTEXT}")
         timeframes.normalize(self.interval)
+        require(self.calendar in ("24/7", "fx"), f"unknown calendar '{self.calendar}'")
 
     @property
     def max_horizon(self) -> int:
@@ -67,7 +69,8 @@ def run_forecasts(df: pd.DataFrame, forecaster: Forecaster, cfg: EvalConfig) -> 
     h = cfg.max_horizon
     paths, actual, last_close, used, stamps, seconds, errors = [], [], [], [], [], [], []
     for k, origin in enumerate(origins):
-        win = make_window(df, origin, cfg.lookback, h, freq=timeframes.freq(cfg.interval))
+        win = make_window(df, origin, cfg.lookback, h, freq=timeframes.freq(cfg.interval),
+                          calendar=cfg.calendar)
         assert win.actual is not None  # guaranteed by choose_origins
         seed = cfg.seed + origin  # identical for every model -> fair comparison
         start = time.perf_counter()

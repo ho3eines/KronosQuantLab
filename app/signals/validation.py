@@ -197,14 +197,17 @@ def _persistence_ari(close: pd.Series, params: ValidationParams, bars_per_year: 
     return compare_labels(current, forward)
 
 
-def calibrate_thresholds(close: pd.Series | np.ndarray, params: ValidationParams = ValidationParams()) -> dict[str, Any]:
+def calibrate_thresholds(
+    close: pd.Series | np.ndarray, params: ValidationParams = ValidationParams(),
+    bars_per_year: float | None = None,
+) -> dict[str, Any]:
     """Run the permutation null and the bootstrap stability test on one close series.
 
     ``close`` must be in chronological order and end at the newest bar.  The result
     is a plain-JSON-serialisable report; nothing here changes a stored dataset.
     """
     interval = timeframes.normalize(params.interval or config.INTERVAL)
-    bpy_factor = float(timeframes.bars_per_year(interval))
+    bpy_factor = float(bars_per_year if bars_per_year is not None else timeframes.bars_per_year(interval))
     c = pd.Series(np.asarray(close, dtype=np.float64)).reset_index(drop=True)
     min_bars = max(params.regime.min_bars, MIN_SERIES_BARS, 2 * params.forward_window)
     if len(c) < min_bars:

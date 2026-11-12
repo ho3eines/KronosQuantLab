@@ -19,9 +19,17 @@ PRICE = ("open", "high", "low", "close")
 
 
 def validate_ohlcv(
-    df: pd.DataFrame, freq: str = "1D", now: dt.datetime | None = None
+    df: pd.DataFrame, freq: str = "1D", now: dt.datetime | None = None, *,
+    utc_grid: bool = True, strict_gaps: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Return ``(clean_df, report)``. ``report['ok']`` is True only if nothing is wrong."""
+    """Return ``(clean_df, report)``. ``report['ok']`` is True only if nothing fatal is wrong.
+
+    ``utc_grid=False`` marks a venue whose bars are not aligned to UTC interval
+    boundaries (Nobitex uses Iran time, MT5 exports use broker server time);
+    ``strict_gaps=False`` marks a calendar whose holes are expected (FX weekends
+    and holidays).  Both cases are still *reported* under ``warnings``, and the
+    values themselves are never invented or patched.
+    """
     missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
         raise DataValidationError(f"missing columns: {missing}")
@@ -30,7 +38,8 @@ def validate_ohlcv(
     step = pd.Timedelta(freq)
     out = df.copy()
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True)
-    report: dict[str, Any] = {"rows_in": int(len(out)), "freq": freq}
+    report: dict[str, Any] = {"rows_in": int(len(out)), "freq": freq,
+                              "utc_grid": bool(utc_grid), "strict_gaps": bool(strict_gaps)}
 
     report["was_sorted"] = bool(out["timestamp"].is_monotonic_increasing)
     out = out.sort_values("timestamp", kind="stable")
@@ -83,13 +92,32 @@ def validate_ohlcv(
             for i in list(gap_idx)[:20]
         ],
     })
-    report["ok"] = not any(
-        report[k] for k in ("null_rows", "invalid_price_rows", "negative_volume_rows", "off_grid_rows", "gaps")
-    )
+    fatal_keys = ["null_rows", "invalid_price_rows", "negative_volume_rows"]
+    if utc_grid:
+        fatal_keys.append("off_grid_rows")
+    if strict_gaps:
+        fatal_keys.append("gaps")
+    report["fatal_problems"] = {k: report[k] for k in fatal_keys if report[k]}
+    report["warnings"] = []
+    if not utc_grid and report["off_grid_rows"]:
+        report["warnings"].append(
+            f"{report['off_grid_rows']} bars are not aligned to UTC {freq} boundaries "
+            "(venue-native timestamps were kept as returned)"
+        )
+    if not strict_gaps and report["gaps"]:
+        report["warnings"].append(
+            f"{report['gaps']} gaps are expected outside the venue's trading sessions "
+            "(weekends/holidays); the stored series is not patched"
+        )
+    if report["zero_volume_rows"] and report["zero_volume_rows"] == report["rows_out"]:
+        report["warnings"].append("every bar reports zero volume")
+    report["ok"] = not report["fatal_problems"]
     return out, report
 
 
 def require_ok(report: dict[str, Any]) -> None:
     if not report.get("ok"):
-        problems = {k: v for k, v in report.items() if k.endswith(("_rows", "gaps")) and v}
+        problems = report.get("fatal_problems") or {
+            k: v for k, v in report.items() if k.endswith(("_rows", "gaps")) and v
+        }
         raise DataValidationError(f"dataset failed validation: {problems}")

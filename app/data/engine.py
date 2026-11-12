@@ -10,9 +10,10 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from app.core import config, timeframes
-from app.core.errors import DataValidationError
+from app.core import config, timeframes, venues
+from app.core.errors import DataValidationError, KQLError
 from app.data import binance
+from app.data.nobitex import NobitexProvider
 from app.data.validation import require_ok, validate_ohlcv
 from app.storage.db import audit
 
@@ -47,6 +48,27 @@ class BinanceProvider:
         self.last_base_url = binance.active_base_url()
         log.debug("%s served %s %s", self.last_base_url, symbol, self.interval)
         return binance.klines_to_frame(rows)
+
+
+PROVIDERS = {"binance": BinanceProvider, "nobitex": NobitexProvider}
+
+
+def provider_for(symbol: str, interval: str | None = None, **kwargs: Any) -> MarketDataProvider:
+    """Pick the public data adapter for a symbol's venue.
+
+    Symbols without a prefix belong to Binance.  Alpari has no public API, so it
+    raises with the import instructions instead of pretending to connect.
+    """
+    venue = venues.venue_of(symbol)
+    factory = PROVIDERS.get(venue.name)
+    if factory is None:
+        raise KQLError(
+            f"{venue.label}: no public, credential-free market-data API. "
+            "Export the history from MetaTrader 5 and run "
+            f"'data import --symbol {venues.join_symbol(venue.name, venue.example_symbols[0])} "
+            "--csv <file> --format mt5'. This project never logs in or sends orders."
+        )
+    return factory(interval=interval, **kwargs)
 
 
 def _resolve_interval(interval: str | None) -> str:
@@ -96,21 +118,30 @@ def load_candles(conn: sqlite3.Connection, symbol: str, interval: str | None = N
 
 def store_candles(
     conn: sqlite3.Connection, symbol: str, df: pd.DataFrame, source: str, now: dt.datetime | None = None,
-    interval: str | None = None,
+    interval: str | None = None, strict: bool | None = None,
 ) -> dict[str, Any]:
     """Validate and insert. Stored candles are immutable: a differing re-download is
-    reported as a conflict and the stored row is kept. Invalid input stores nothing."""
+    reported as a conflict and the stored row is kept. Invalid input stores nothing.
+
+    ``strict`` overrides the venue's validation policy: by default only a 24/7
+    venue on a UTC grid (Binance) rejects off-grid bars and holes.  Venue-native
+    timestamps (Nobitex) and FX calendars (Alpari) report them as warnings.
+    """
     interval = _resolve_interval(interval)
     tf = timeframes.get(interval)
+    venue = venues.venue_of(symbol)
+    strict = venue.strict if strict is None else bool(strict)
     now = now or dt.datetime.now(dt.UTC)  # always drop candles that have not closed yet
-    clean, report = validate_ohlcv(df, freq=tf.freq, now=now)
+    clean, report = validate_ohlcv(df, freq=tf.freq, now=now, utc_grid=venue.utc_grid, strict_gaps=strict)
     require_ok(report)
     prev = last_timestamp(conn, symbol, interval)
     new = clean if prev is None else clean[clean["timestamp"] > prev]
     if prev is not None and not new.empty and new["timestamp"].iloc[0] != prev + tf.step:
-        raise DataValidationError(
-            f"{symbol} {interval}: new data starts at {new['timestamp'].iloc[0]} but stored data ends at {prev} (gap)"
-        )
+        message = (f"{symbol} {interval}: new data starts at {new['timestamp'].iloc[0]} but stored data "
+                   f"ends at {prev} (gap)")
+        if strict:
+            raise DataValidationError(message)
+        log.warning("%s; accepted because %s follows a non-continuous calendar", message, venue.label)
     conflicts = 0
     if prev is not None:
         overlap = clean[clean["timestamp"] <= prev]
@@ -123,9 +154,12 @@ def store_candles(
             for t, vals in zip(new["timestamp"], new[COLS].to_numpy(), strict=True)]
     with conn:
         conn.executemany("INSERT INTO candles VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
-        result = {"symbol": symbol, "interval": interval, "source": source, "inserted": len(rows),
+        result = {"symbol": symbol, "interval": interval, "source": source, "venue": venue.name,
+                  "calendar": venue.calendar, "inserted": len(rows),
                   "conflicting_values": conflicts, "incomplete_dropped": report["incomplete_dropped"],
-                  "duplicates_dropped": report["duplicates_dropped"], "last": str(last_timestamp(conn, symbol, interval))}
+                  "duplicates_dropped": report["duplicates_dropped"],
+                  "warnings": report.get("warnings", []),
+                  "last": str(last_timestamp(conn, symbol, interval))}
         audit(conn, "data_update", result)
     if conflicts:
         log.warning("%s: %d stored values differ from the provider; stored rows were kept", symbol, conflicts)
@@ -152,10 +186,13 @@ def data_status(conn: sqlite3.Connection, interval: str | None = None) -> list[d
         "SELECT symbol, COUNT(*) AS n, MIN(ts) AS first, MAX(ts) AS last, GROUP_CONCAT(DISTINCT source) AS source "
         "FROM candles WHERE interval = ? GROUP BY symbol ORDER BY symbol", (interval,)
     ):
+        venue = venues.venue_of(row["symbol"])
         expected = timeframes.bars_between(row["first"], row["last"], interval)
         stamp = (lambda v: v[:10]) if interval == "1d" else (lambda v: v[:16].replace("T", " "))
-        out.append({"symbol": row["symbol"], "interval": interval, "rows": row["n"],
+        out.append({"symbol": row["symbol"], "interval": interval, "venue": venue.name,
+                    "calendar": venue.calendar, "rows": row["n"],
                     "first": stamp(row["first"]), "last": stamp(row["last"]),
-                    "missing_bars": expected - row["n"], "step": str(tf.step),
+                    "missing_bars": None if venue.calendar != "24/7" else expected - row["n"],
+                    "step": str(tf.step),
                     "source": row["source"], "synthetic": row["symbol"] == config.SYNTHETIC_SYMBOL})
     return out

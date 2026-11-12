@@ -42,6 +42,7 @@ def origin_seed(base_seed: int, origin_ts: pd.Timestamp) -> int:
 def make_forecast(
     df: pd.DataFrame, forecaster: Forecaster, lookback: int, horizon: int, n_paths: int,
     base_seed: int = 20260101, origin: int | None = None, interval: str | None = None,
+    calendar: str = "24/7",
 ) -> Forecast:
     """Forecast the ``horizon`` bars after row ``origin - 1`` (default: after the last row)."""
     if n_paths < 2:
@@ -49,7 +50,7 @@ def make_forecast(
     origin = len(df) if origin is None else origin
     lookback = min(lookback, origin)
     freq = timeframes.freq(interval) if interval is not None else None
-    win = make_window(df, origin, lookback, horizon, freq=freq)
+    win = make_window(df, origin, lookback, horizon, freq=freq, calendar=calendar)
     origin_ts = pd.Timestamp(win.context["timestamp"].iloc[-1])
     seed = origin_seed(base_seed, origin_ts)
     paths = forecaster.sample_paths(win.context, win.future_ts, n_paths, seed)

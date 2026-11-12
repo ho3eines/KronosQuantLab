@@ -3,7 +3,8 @@
   python scripts/kql.py settings                                  effective configuration (no secrets)
   python scripts/kql.py data update [--symbols BTCUSDT ETHUSDT] [--interval 1d]
   python scripts/kql.py data demo [--rows 900] [--interval 1d]    load a SYNTHETIC series (no internet)
-  python scripts/kql.py data import --symbol X --csv file.csv     import a clean CSV
+  python scripts/kql.py data import --symbol X --csv file.csv     import a clean CSV or an MT5 export
+  python scripts/kql.py data venues                               which venues exist and how they connect
   python scripts/kql.py data status [--interval 1d]
   python scripts/kql.py models                                    which forecasters are usable, and their IDs
   python scripts/kql.py forecast  --symbol S --model M            P10/P50/P90 forecast, stored in SQLite
@@ -16,6 +17,8 @@
 
 Models: baseline-bootstrap (built in), kronos-small, kronos-base (need downloaded weights).
 Market data: data-api.binance.vision first, api.binance.com automatically on HTTP 451/403.
+Venues: Binance (bare symbols), NOBITEX:BTCIRT (public OHLC, no token), ALPARI:EURUSD (MT5 CSV export).
+Everything is read-only market data: no exchange account, no API key, no order code.
 """
 from __future__ import annotations
 
@@ -33,10 +36,10 @@ from app import services  # noqa: E402
 from app.backtest.engine import BacktestConfig  # noqa: E402
 from app.backtest.execution import Costs  # noqa: E402
 from app.backtest.portfolio import PortfolioConfig  # noqa: E402
-from app.core import config, timeframes  # noqa: E402
+from app.core import config, timeframes, venues  # noqa: E402
 from app.core.errors import KQLError  # noqa: E402
 from app.core.runs import dumps, safe_console  # noqa: E402
-from app.data import engine  # noqa: E402
+from app.data import alpari, engine  # noqa: E402
 from app.evaluation.rolling import EvalConfig  # noqa: E402
 from app.forecast.registry import BASELINE, MODEL_NAMES, model_available  # noqa: E402
 from app.paper import simulator  # noqa: E402
@@ -128,12 +131,16 @@ def cmd_data(args: argparse.Namespace) -> int:
     conn = services.open_db()
     interval = args.interval
     if args.action == "update":
-        provider = engine.BinanceProvider(interval=interval)
         failed = 0
         for symbol in args.symbols:
             try:
+                provider = engine.provider_for(symbol, interval=interval)
                 out = engine.update_symbol(conn, provider, symbol)
-                out["served_by"] = provider.last_base_url
+                served_by = getattr(provider, "last_base_url", None) or getattr(provider, "base_url", None)
+                out["served_by"] = served_by
+                notes = getattr(provider, "notes", None)
+                if notes:
+                    out["notes"] = notes
                 _show(out)
             except KQLError as exc:  # one symbol failing must not stop the others
                 failed += 1
@@ -147,8 +154,26 @@ def cmd_data(args: argparse.Namespace) -> int:
     if args.action == "import":
         if not args.symbol or not args.csv:
             raise KQLError("data import needs --symbol and --csv")
-        _show(engine.store_candles(conn, args.symbol, pd.read_csv(args.csv), f"csv:{Path(args.csv).name}",
-                                   interval=interval))
+        path = Path(args.csv)
+        fmt = args.format
+        if fmt == "auto":
+            fmt = "mt5" if alpari.looks_like_mt5(path) or venues.venue_name(args.symbol) == "alpari" else "csv"
+        meta: dict[str, object] = {}
+        if fmt == "mt5":
+            df, meta = alpari.read_mt5_csv(path, interval=interval, tz_offset_hours=args.tz_offset)
+        else:
+            df = pd.read_csv(path)
+        out = engine.store_candles(conn, args.symbol, df, f"{fmt}:{path.name}", interval=interval,
+                                   strict=True if args.strict else None)
+        if meta:
+            out["import"] = meta
+        _show(out)
+        return 0
+    if args.action == "venues":
+        print(pd.DataFrame(venues.describe()).to_string(index=False))
+        print(f"\nNobitex base URL: {config.NOBITEX_BASE_URL} (public OHLC, no token)")
+        print("Alpari: no public market-data API - export from MT5 and use 'data import --format mt5'.")
+        print("This project sends no orders and stores no credentials.")
         return 0
     rows = engine.data_status(conn, interval)
     print(pd.DataFrame(rows).to_string(index=False) if rows else f"database has no {interval} candles")
@@ -339,10 +364,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("settings").set_defaults(func=cmd_settings)
 
     sp = sub.add_parser("data")
-    sp.add_argument("action", choices=["update", "demo", "import", "status"])
+    sp.add_argument("action", choices=["update", "demo", "import", "venues", "status"])
     sp.add_argument("--symbols", nargs="+", default=list(config.DEFAULT_SYMBOLS))
     sp.add_argument("--symbol")
     sp.add_argument("--csv")
+    sp.add_argument("--format", choices=["auto", "csv", "mt5"], default="auto",
+                    help="import format; 'mt5' reads an Alpari MetaTrader 5 history export")
+    sp.add_argument("--tz-offset", type=float, default=0.0,
+                    help="hours to subtract from MT5 export timestamps (broker server time -> UTC)")
+    sp.add_argument("--strict", action="store_true",
+                    help="reject off-grid bars and calendar gaps even for venue-native venues")
     sp.add_argument("--rows", type=positive_int, default=900)
     sp.add_argument("--interval", type=interval_value, default=config.INTERVAL,
                     choices=timeframes.SUPPORTED_INTERVALS)

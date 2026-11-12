@@ -117,6 +117,64 @@ git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 
 بازه‌ها در پایگاه داده جدا نگهداری می‌شوند (`candles.interval` و `forecast_runs.interval`) و تنظیمات نمونه‌گیری هر اجرا (`temperature`، `top_p`، `top_k`) نیز در `forecast_runs` ثبت می‌شود. سالانه‌سازی نوسان/شارپ از طول کندل محاسبه می‌شود (365 برای روزانه، 2190 برای ۴ ساعته، 8760 برای ۱ ساعته).
 
+## صرافی‌ها و منابع داده (Binance، Nobitex، Alpari)
+
+هر نماد به یک «venue» تعلق دارد. نماد بدون پیشوند یعنی Binance؛ بقیه با پیشوند ذخیره می‌شوند
+(`NOBITEX:BTCIRT`، `ALPARI:EURUSD`) تا نمادهای هم‌نام دو صرافی در پایگاه داده قاطی نشوند.
+
+| venue | پیشوند نماد | تقویم | اتصال | احراز هویت |
+|---|---|---|---|---|
+| Binance | — (`BTCUSDT`) | ۲۴/۷، ۳۶۵ روز | kline عمومی؛ `data-api.binance.vision` و جایگزین خودکار `api.binance.com` | ندارد |
+| Nobitex | `NOBITEX:` (`NOBITEX:BTCIRT`) | ۲۴/۷، ۳۶۵ روز | OHLC عمومی `GET /market/udf/history` | ندارد (هیچ توکنی خوانده نمی‌شود) |
+| Alpari | `ALPARI:` (`ALPARI:EURUSD`) | FX، ۲۵۲ روز | خروجی CSV از MetaTrader 5 | ندارد؛ ورود به حساب انجام نمی‌شود |
+
+### Nobitex
+
+```powershell
+& $k[0] $k[1] data update --symbols NOBITEX:BTCIRT NOBITEX:ETHIRT --interval 1d
+& $k[0] $k[1] forecast --symbol NOBITEX:BTCIRT --model baseline-bootstrap --interval 4h
+& $k[0] $k[1] data venues
+```
+
+- حداکثر ۵۰۰ کندل در هر پاسخ؛ آداپتور از پنجره‌های زمانی صریح و **از جدید به قدیم** استفاده می‌کند،
+  پس به معنای پارامتر `page` (که در مستندات نیامده) وابسته نیست.
+- `s` می‌تواند `no_data` یا `error` باشد؛ هر دو صریح مدیریت می‌شوند و حدس زده نمی‌شوند.
+- مرز کندل‌ها به وقت ایران است. timestamp **دست‌نخورده** ذخیره می‌شود؛ «خارج از شبکه UTC» و
+  شکاف‌ها به‌صورت هشدار گزارش می‌شوند و باعث رد داده نمی‌شوند (با `data import --strict` می‌توان
+  سخت‌گیر شد).
+- نوبیتکس فقط حجم پایه را می‌دهد؛ `amount` به‌صورت `volume × close` ساخته می‌شود و در خروجی
+  `notes` همین موضوع ذکر می‌شود.
+- تنظیم‌ها: `KQL_NOBITEX_BASE_URL`، `KQL_NOBITEX_REQUEST_INTERVAL` (فاصله بین صفحه‌ها)،
+  `KQL_NOBITEX_TIMEOUT`، `KQL_NOBITEX_RETRIES`، `KQL_NOBITEX_HISTORY_START`.
+
+### Alpari (MetaTrader 5)
+
+آلپاری API عمومی و بدون‌کلید برای کندل‌ها ندارد؛ داده از ترمینال MT5 می‌آید که ورود به حساب لازم دارد.
+این پروژه هیچ ورود/حساب/سفارشی ندارد، پس مسیر پشتیبانی‌شده **خروجی گرفتن** است:
+
+1. در MetaTrader 5: `Toolbox → History`، نماد و تایم‌فریم را انتخاب کنید.
+2. راست‌کلیک → `Export` → `CSV`.
+3. فایل را وارد کنید:
+
+```powershell
+& $k[0] $k[1] data import --symbol ALPARI:EURUSD --csv .\EURUSD_1d.csv --interval 1d --format mt5
+# اگر زمان سرور بروکر UTC نیست، اختلاف ساعت را صریح بدهید (مثلاً UTC+3):
+& $k[0] $k[1] data import --symbol ALPARI:EURUSD --csv .\EURUSD_1d.csv --interval 1d --format mt5 --tz-offset 3
+```
+
+- جداکننده tab/`;`/`,`، هدرهای `<DATE>/<TIME>` یا `Date/Time`، تاریخ‌های روز-اول و
+  `TICKVOL` (به‌جای حجم واقعی که در FX صفر است) پشتیبانی می‌شوند.
+- زمان خروجی «زمان سرور بروکر» است و حدس زده نمی‌شود: با `--tz-offset` تبدیل می‌شود و
+  انتخاب شما در گزارش import ثبت می‌شود.
+- تقویم FX: سالانه‌سازی ۲۵۲ روز (نه ۳۶۵) و شکاف‌های آخر هفته/تعطیلات طبیعی‌اند؛ گزارش
+  می‌شوند ولی داده را رد نمی‌کنند. `--strict` همه شکاف‌ها را خطا می‌کند.
+- اگر فاصله کندل‌ها با `--interval` نخواند (مثلاً خروجی ۱ ساعته با `--interval 1d`)،
+  import با پیام روشن رد می‌شود.
+- داشبورد و CLI از همان داده ذخیره‌شده استفاده می‌کنند؛ نیازی به اتصال زنده نیست.
+
+پرتفوی با نمادهای چند venue در یک اجرا پذیرفته نمی‌شود، چون تقویم و سالانه‌سازی مشترک
+تعریف‌شده‌ای ندارد.
+
 ## کار روزمره (P1 تا P5)
 
 مدل‌ها: `baseline-bootstrap` (داخلی، بدون وزن)، `kronos-small`، `kronos-base`.
@@ -138,6 +196,8 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 & $k[0] $k[1] paper init                                             # P5: حساب فرضی
 & $k[0] $k[1] paper step --symbol BTCUSDT --model kronos-small       # یک بار در هر کندل
 & $k[0] $k[1] paper status
+& $k[0] $k[1] data update --symbols NOBITEX:BTCIRT --interval 1d       # P1: نوبیتکس (عمومی)
+& $k[0] $k[1] data import --symbol ALPARI:EURUSD --csv EURUSD_1d.csv --format mt5   # P1: خروجی MT5
 .\.venv\Scripts\streamlit run app\ui\dashboard.py                    # داشبورد
 ```
 
