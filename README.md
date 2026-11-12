@@ -243,6 +243,7 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 | سند | محتوا |
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | وضعیت انجام‌شده/انجام‌نشده، شواهد تست و قدم‌های بعدی |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | انطباق خط‌به‌خط با تنظیمات درخواستی (هر پارامتر + باقی‌مانده) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | ماژول‌ها و جریان داده |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | تصمیم‌های فنی و دلیل آن‌ها |
 | [docs/P0_plan.md](docs/P0_plan.md) | تحقیق منبع مدل و API واقعی Kronos |
