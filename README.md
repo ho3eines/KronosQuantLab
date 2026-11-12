@@ -20,7 +20,7 @@
 | P3 رژیم، قواعد، کالیبراسیون آستانه | ✅ | 🟡 با داده ساختگی |
 | P4 بک‌تست تک‌دارایی و پرتفوی | ✅ | 🟡 با داده ساختگی |
 | P5 paper و داشبورد | ✅ | 🟡 داشبورد در این محیط اجرا نشده |
-| تست، مستندات | ✅ | ۱۹۲ passed، ۱۰ skipped |
+| تست، مستندات | ✅ | ۱۹۷ passed، ۱۰ skipped |
 | CI، coverage، بسته‌بندی | ⬜ | شروع نشده |
 
 ✅ = کد + تست خودکار · 🟡 = آماده ولی اجرای واقعی/تأیید بیرونی نشده · ⛔ = عمداً خارج از دامنه ·
@@ -124,7 +124,7 @@ python scripts\kql.py models
 ```
 
 انتظار: **هیچ تست `failed` نداشته باشید**. تعداد `skipped` به نصب بودن torch/Streamlit و وزن‌ها بستگی
-دارد؛ روی نصب کامل، عددها بیشتر از «192 passed, 10 skipped» است. در `kql.py models`، `baseline-bootstrap` باید available باشد و
+دارد؛ روی نصب کامل، عددها بیشتر از «197 passed, 10 skipped» است. در `kql.py models`، `baseline-bootstrap` باید available باشد و
 `kronos-small/base` تا زمانی که وزن دانلود نشود «NOT available» نشان می‌دهند؛ این طبیعی است و یعنی
 نصب سالم است.
 
@@ -195,7 +195,7 @@ python -m streamlit run app\ui\dashboard.py
 
 | بررسی | دستور | نتیجه سالم |
 |---|---|---|
-| تست‌ها | `python -m pytest -q` | بدون `failed` (skipped وابسته به torch/Streamlit/وزن است) |
+| تست‌ها | `python -m pytest -q` | بدون `failed` (در نصب کامل: ۱۹۷ passed، ۱۰ skipped) |
 | تنظیمات | `python scripts\kql.py settings` | JSON با `interval`، `models`، `venues` |
 | مدل‌ها | `python scripts\kql.py models` | baseline available؛ Kronos بعد از دانلود weight |
 | دیتابیس | `python scripts\kql.py data status` | ساخت جدول‌ها بدون خطا (حتی اگر خالی باشد) |
@@ -292,7 +292,7 @@ python scripts/kql.py settings
 | `n_bootstrap` | 50 | تعداد نمونه بوت‌استرپ بلوکی برای سنجش پایداری |
 | `forward_window` | 10 | تعداد کندل «رژیم آینده» که ARI با آن سنجیده می‌شود |
 
-روش: رژیم هر کندل (روند × نوسان از داده گذشته) با رژیم `forward_window` کندل بعدی روی **همان کندل‌ها** با شاخص ARI مقایسه می‌شود. سپس بازده‌ها جایگشت می‌خورند تا معلوم شود ARI تحت تصادف چقدر است، و بوت‌استرپ بلوکی پایداری آماره را می‌سنجد. نتیجه در `artifacts/reports/threshold_validation_*` ذخیره می‌شود و شامل `passed`، توزیع صفر و بازه بوت‌استرپ است. عبور از این آزمون یعنی برچسب‌ها از تصادف جدا و تکرارپذیرند؛ **یعنی قواعد سودآورند نیست**.
+روش: رژیم هر کندل (روند × نوسان از داده گذشته) با رژیم `forward_window` کندل بعدی روی **همان کندل‌ها** با شاخص ARI مقایسه می‌شود. سپس بازده‌ها جایگشت می‌خورند تا معلوم شود ARI تحت تصادف چقدر است، و بوت‌استرپ بلوکی پایداری آماره را می‌سنجد. نتیجه در `artifacts/reports/threshold_validation_*` ذخیره می‌شود و شامل `passed`، توزیع صفر و بازه بوت‌استرپ است. عبور از این آزمون یعنی برچسب‌ها از تصادف جدا و تکرارپذیرند، **نه اینکه قواعد سودآورند**.
 
 ```powershell
 .\.venv\Scripts\python scripts\kql.py validate --symbol BTCUSDT --alpha 0.05 --n-permutations 100 --n-bootstrap 50
@@ -372,6 +372,8 @@ python scripts/kql.py settings
 
 - جداکننده tab/`;`/`,`، هدرهای `<DATE>/<TIME>` یا `Date/Time`، تاریخ‌های روز-اول و
   `TICKVOL` (به‌جای حجم واقعی که در FX صفر است) پشتیبانی می‌شوند.
+- انکودینگ فایل خودکار تشخیص داده می‌شود: UTF-8، UTF-16 (خروجی «Unicode» متاتریدر، با یا بدون BOM)
+  و cp1252. انکودینگ شناسایی‌شده در گزارش import ثبت می‌شود.
 - زمان خروجی «زمان سرور بروکر» است و حدس زده نمی‌شود: با `--tz-offset` تبدیل می‌شود و
   انتخاب شما در گزارش import ثبت می‌شود.
 - تقویم FX: سالانه‌سازی ۲۵۲ روز (نه ۳۶۵) و شکاف‌های آخر هفته/تعطیلات طبیعی‌اند؛ گزارش
@@ -440,6 +442,7 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | انطباق خط‌به‌خط با تنظیمات درخواستی (هر پارامتر + باقی‌مانده) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | ماژول‌ها و جریان داده |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | تصمیم‌های فنی و دلیل آن‌ها |
+| [docs/AUDIT.md](docs/AUDIT.md) | بازبینی کد در برابر مستندات: چه چیزی تأیید شد و چه تناقضی اصلاح شد |
 | [docs/P0_plan.md](docs/P0_plan.md) | تحقیق منبع مدل و API واقعی Kronos |
 | [docs/P0_environment_report.md](docs/P0_environment_report.md) | گزارش محیط |
 | [CHANGELOG.md](CHANGELOG.md) | تغییرات |
@@ -448,14 +451,16 @@ $k = ".\.venv\Scripts\python", "scripts\kql.py"
 
 | نشانه | اقدام |
 |---|---|
-| Kronos خیلی کند است | `--n-paths 10`، `--n-origins 8`، `--n-decisions 12`، `--rebalance-every 5`. پیش‌بینی‌ها در `artifacts\forecast_cache` ذخیره می‌شوند (کلید cache شامل مدل، نمونه‌گیری، seed و دقیقاً همان پنجره است). |
+| Kronos خیلی کند است | مسیرهای کمتر: `--n-paths 10` (در `forecast`/`backtest`/`portfolio`). مبدأهای کمتر: `--n-origins` (فقط `calibrate`). تصمیم‌های کمتر: `--n-decisions` (فقط `backtest`). بازچینش دیرتر: `--rebalance-every` (در `backtest`/`portfolio`). پیش‌بینی‌ها در `artifacts\forecast_cache` ذخیره می‌شوند (کلید cache شامل مدل، نمونه‌گیری، `n_paths`، seed و دقیقاً همان پنجره است). |
 | خطای حافظه در P0 | `--batch-size 5` |
 | `could not fetch ...` یا `no Binance market-data host answered` | شبکه به هیچ‌کدام از دو دامنه دسترسی ندارد؛ `KQL_BINANCE_BASE_URL`/`KQL_BINANCE_FALLBACK_URLS` را تنظیم کنید یا از `data import --csv` استفاده کنید. |
 | `gap` هنگام به‌روزرسانی داده | برای Binance سخت‌گیر است و چیزی ذخیره نمی‌شود تا سری ناقص وارد نشود؛ برای Nobitex/Alpari (تقویم بومی) فقط هشدار است. `--strict` را برای رد قطعی به کار ببرید. |
-| `factor = None` در کالیبراسیون | مبدأ کافی نیست (برای سطح ۰٫۸ حداقل ۴ مبدأ کالیبراسیون)؛ `--n-origins` را زیاد کنید. |
-| `NOT PASSED` در `validate` | برچسب‌های رژیم از تصادف جدا نیستند یا پایدار نیستند؛ آستانه‌های P3 را روی این تاریخچه کالیبره نکنید. تاریخچه بلندتر یا `--forward-window` بزرگ‌تر را امتحان کنید. |
+| `factor = None` در کالیبراسیون | مبدأ کافی نیست: با `calib_fraction` پیش‌فرض ۰٫۵ برای سطح ۰٫۸ به **۸ مبدأ کل** (۴ مبدأ کالیبراسیون + ۴ مبدأ آزمون) نیاز است. `--n-origins` را زیاد کنید و توجه کنید که طول تاریخچه سقف مبدأها را تعیین می‌کند. |
+| `NOT PASSED` در `validate` | برچسب‌های رژیم از تصادف جدا نیستند یا پایدار نیستند؛ آستانه‌های P3 را روی این تاریخچه کالیبره نکنید. تاریخچه بلندتر یا `--forward-window` بزرگ‌تر را امتحان کنید. توجه: در این حالت کد خروج **۱** است (قابل استفاده در اسکریپت). |
 | `lookback ... exceeds` یا `horizon ... MAX_HORIZON` | سقف‌ها 512 و 96 کندل‌اند؛ مقدار کوچک‌تری بدهید. |
 | `Nobitex` خطای TLS/شبکه | آدرس `KQL_NOBITEX_BASE_URL` را بررسی کنید؛ در صورت مسدود بودن، از `data import --csv` استفاده کنید. هیچ توکنی لازم نیست. |
-| `data import --format mt5` خطا داد | تایم‌فریم خروجی MT5 باید با `--interval` بخواند؛ برای زمان سرور بروکر `--tz-offset` بدهید. |
-| `weights missing` | گام P0 ‏(`p0.py models --download --yes`) اجرا نشده است. |
+| `data demo` ردیف جدید اضافه نکرد | اگر همین نماد/بازه قبلاً ذخیره شده باشد، کندل‌های ذخیره‌شده تغییر نمی‌کنند و اجرای دوباره با `--rows` متفاوت `inserted: 0` و `conflicting_values` نشان می‌دهد. برای سری تازه، دیتابیس دیگری بدهید (`KQL_DB_PATH`). |
+| `data import --format mt5` خطا داد | تایم‌فریم خروجی MT5 باید با `--interval` بخواند؛ برای زمان سرور بروکر `--tz-offset` بدهید. فایل UTF-16 (خروجی «Unicode» متاتریدر) و cp1252 خودکار تشخیص داده می‌شوند. |
+| `weights not found in ...` | گام P0 ‏(`p0.py models --download --yes`) اجرا نشده است. |
 | `license unknown` | model card مجوزی اعلام نکرده؛ صفحه مدل را بخوانید و فقط در صورت پذیرش `--accept-unknown-license` بدهید. |
+| `report` خطای «already exists» داد | `p0.py report` گزارش را بازنویسی نمی‌کند؛ اگر `docs/P0_model_benchmark.md` هست، با `--force` صریح اجرا کنید. |

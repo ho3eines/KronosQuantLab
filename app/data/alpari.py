@@ -18,6 +18,7 @@ choice is recorded in the import report; nothing is guessed silently.
 """
 from __future__ import annotations
 
+import codecs
 import io
 import re
 from pathlib import Path
@@ -34,22 +35,49 @@ DELIMITERS = {"\t": "tab", ";": "semicolon", ",": "comma"}
 DATE_HINTS = ("date", "datetime", "timestamp", "time")
 
 
-def read_text(source: str | Path | TextIO) -> str:
-    """CSV text from a file path, a file object, or the text itself (``str``)."""
+def decode_bytes(raw: bytes) -> tuple[str, str]:
+    """Decode an MT5 export's bytes; returns ``(text, encoding actually used)``.
+
+    MetaTrader writes its "Unicode" export as UTF-16 (usually with a BOM, sometimes
+    without) and the ANSI export as UTF-8/Windows-1252.  A UTF-16 file decoded as
+    cp1252 "succeeds" but yields NUL-riddled text that later looks like a broken
+    DATE column, so the BOM/NUL check has to come first.
+    """
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig", errors="replace"), "utf-8-sig"
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16", errors="replace"), "utf-16"
+    if b"\x00" in raw:  # UTF-16 without a BOM: every ASCII char has a NUL partner
+        for encoding in ("utf-16-le", "utf-16-be"):
+            try:
+                text = raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            return text, encoding
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace"), "utf-8 (with replacement characters)"
+
+
+def load_text(source: str | Path | TextIO) -> tuple[str, str | None]:
+    """``(text, encoding)``; ``encoding`` is ``None`` when the caller passed text."""
     if hasattr(source, "read"):
         text = source.read()  # type: ignore[union-attr]
-        return text if isinstance(text, str) else text.decode("utf-8-sig", errors="replace")
+        return (text, None) if isinstance(text, str) else decode_bytes(text)
     if not isinstance(source, Path):
-        return str(source)  # the caller already has the text
+        return str(source), None  # the caller already has the text
     path = source
     if not path.is_file():
         raise DataValidationError(f"CSV not found: {path}")
-    for encoding in ("utf-8-sig", "cp1252"):
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-    raise DataValidationError(f"could not decode {path} as UTF-8 or cp1252")
+    return decode_bytes(path.read_bytes())
+
+
+def read_text(source: str | Path | TextIO) -> str:
+    """CSV text from a file path, a file object, or the text itself (``str``)."""
+    return load_text(source)[0]
 
 
 def looks_like_mt5(source: str | Path | TextIO) -> bool:
@@ -117,7 +145,7 @@ def read_mt5_csv(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Parse an MT5 history export into the project's OHLCV frame + a report."""
     interval = timeframes.normalize(interval or "1d")
-    text = read_text(source)
+    text, encoding = load_text(source)
     delimiter = _delimiter(text)
     raw, had_header = _frame(text, delimiter)
     columns = [str(c) for c in raw.columns]
@@ -159,12 +187,16 @@ def read_mt5_csv(
         out["timestamp"] = out["timestamp"] - pd.Timedelta(hours=float(tz_offset_hours))
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True)
     if out.empty:
-        raise DataValidationError("the MT5 export has no usable rows (check the DATE format)")
+        detail = "text" if encoding is None else encoding
+        raise DataValidationError(
+            "the MT5 export has no usable rows: no DATE could be parsed "
+            f"(check the DATE format; the file was decoded as {detail})"
+        )
 
     step = timeframes.step(interval)
     deltas = out["timestamp"].diff().dropna()
+    median = deltas.median() if not deltas.empty else pd.Timedelta(0)
     if not deltas.empty:
-        median = deltas.median()
         tolerance = max(pd.Timedelta(hours=2), step * 0.1)  # DST/server-clock drift on daily bars
         if abs(median - step) > tolerance:
             raise ConfigError(
@@ -173,6 +205,7 @@ def read_mt5_csv(
 
     report = {
         "format": "mt5",
+        "encoding": encoding or "text passed in memory",
         "delimiter": DELIMITERS[delimiter],
         "header_detected": had_header,
         "rows": int(len(out)),

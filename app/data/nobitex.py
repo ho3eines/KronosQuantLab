@@ -8,10 +8,10 @@ Docs (``GET /market/udf/history``)::
 
 Facts this adapter is built around:
 
-* at most **500 candles per response**, and the documented paging parameter is
-  ``page``; this adapter never relies on the direction of that paging.  It walks
-  forward in explicit ``from``/``to`` time windows instead, so each request is
-  unambiguous;
+* at most **500 candles per response**, and an undocumented paging parameter
+  ``page`` exists; this adapter never relies on it.  It walks **backwards** in
+  explicit ``from``/``to`` time windows (newest first), so each request is
+  unambiguous and an empty early window cannot hide later data;
 * ``s`` can also be ``"no_data"`` (nothing in the window) or ``"error"`` with a
   message in ``errmsg``; both are handled explicitly instead of being parsed;
 * the venue reports **base volume only**.  ``amount`` (quote volume) is therefore

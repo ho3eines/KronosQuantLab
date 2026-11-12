@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-REPORT_DIR = REPO_ROOT / "artifacts" / "reports"
+ARTIFACTS_DIR = Path(os.environ.get("KQL_ARTIFACTS_DIR") or REPO_ROOT / "artifacts")
+REPORT_DIR = ARTIFACTS_DIR / "reports"  # honours KQL_ARTIFACTS_DIR, like the other entry points
 
 
 def run(cmd: list[str], timeout: int = 30) -> dict[str, Any]:

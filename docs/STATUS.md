@@ -1,6 +1,6 @@
 # وضعیت پیاده‌سازی — چه انجام شده و چه نشده
 
-آخرین به‌روزرسانی: **2026-11-12** · شاخه: `arena/fa97d41b-kronosquantlab` · کامیت کد: `08e87b2`
+آخرین به‌روزرسانی: **2026-11-12** · شاخه: `arena/fa97d41b-kronosquantlab` · کامیت کد: `07415e3`
 
 انطباق خط‌به‌خط با تنظیمات درخواستی (هر پارامتر، محل پیاده‌سازی و باقی‌مانده): [`REQUIREMENTS.md`](REQUIREMENTS.md).
 
@@ -31,7 +31,9 @@
   ندارد و وزن‌های Kronos نیز دانلود نشده‌اند. همه اجراها با داده ساختگی و مدل پایه داخلی انجام شده‌اند.
 - P0 (مقایسه Kronos-small و Kronos-base) هنوز **اجرا نشده**؛ تا آن زمان معلوم نیست Kronos از روش
   ساده بهتر است یا نه.
-- وضعیت تست: **۱۹۲ passed، ۱۰ skipped** (۲۰۲ تست جمع‌آوری‌شده)؛ `ruff --select F,E9` و `mypy` پاک.
+- وضعیت تست: **۱۹۷ passed، ۱۰ skipped** (۲۰۷ تست جمع‌آوری‌شده)؛ `ruff --select F,E9` و `mypy` پاک.
+- بازبینی کد در برابر مستندات انجام شد: [`AUDIT.md`](AUDIT.md) — ۱۳ تناقض مستندات و ۴ ضعف کد
+  پیدا و رفع شد؛ هیچ بخشی «مستندشده ولی پیاده‌نشده» پیدا نشد.
 
 ---
 
@@ -52,7 +54,7 @@
 | داده Binance | ✅ | 🟡 | دو دامنه + fallback؛ درخواست زنده از این محیط مسدود |
 | داده Nobitex | ✅ | 🟡 | OHLC عمومی بدون توکن؛ تست با fetcher جعلی؛ TLS محیط اجازه نداد |
 | داده Alpari | ✅ CSV | ⛔ اتصال زنده | API عمومی ندارد؛ MT5 ورود می‌خواهد و در دامنه پروژه نیست |
-| تست و مستندات | ✅ | — | ۱۹۶ تست، README/ARCHITECTURE/DECISIONS/CHANGELOG |
+| تست و مستندات | ✅ | — | ۱۹۷ تست، README/ARCHITECTURE/DECISIONS/CHANGELOG/AUDIT |
 | CI (GitHub Actions) | ⬜ | — | هیچ workflow در مخزن نیست؛ تست‌ها فقط محلی اجرا می‌شوند |
 | پوشش تست (coverage) | ⬜ | — | ابزار/آستانه‌ای تعریف نشده |
 | بسته‌بندی/نصب به‌عنوان کتابخانه | ⬜ | — | اجرا از ریشه مخزن با اسکریپت‌های `scripts/` است |
@@ -115,7 +117,8 @@
 
 - `README.md` — نصب گام‌به‌گام (Windows/Linux)، `.env`، سلامت نصب، عیب‌یابی، تنظیمات، صرافی‌ها و قواعد زمانی.
 - `docs/ARCHITECTURE.md` — نقشه ماژول‌ها، جریان داده، قراردادها و محدودیت‌ها.
-- `docs/DECISIONS.md` — ۴۱ تصمیم ثبت‌شده (D1–D41) با دلیل و وضعیت.
+- `docs/DECISIONS.md` — ۴۲ تصمیم ثبت‌شده (D1–D42) با دلیل و وضعیت.
+- `docs/AUDIT.md` — بازبینی کد در برابر مستندات، تناقض‌های اصلاح‌شده و مرز «تأییدشده/تأییدنشده».
 - `docs/P0_plan.md`، `docs/P0_environment_report.md`، `docs/P0_model_benchmark.md` — وضعیت P0.
 - `CHANGELOG.md` — تاریخچه تغییرات، شامل افزودن intervalها، صرافی‌ها و کالیبراسیون آستانه‌ها.
 
@@ -145,8 +148,8 @@
 
 ## ۵. شواهد تست
 
-`python -m pytest -q` → **۱۹۲ passed، ۱۰ skipped** (۲۰۲ جمع‌آوری‌شده). ۱۰ تست skip
-وابسته به torch/وزن‌های واقعی/شبکه‌اند.
+`python -m pytest -q` → **۱۹۷ passed، ۱۰ skipped** (۲۰۷ جمع‌آوری‌شده). ۹ skip مربوط به نبود
+`torch`/`vendor/Kronos`/وزن‌های واقعی است و ۱ skip مربوط به نصب نبودن Streamlit.
 
 | فایل | تعداد | پوشش موضوعی |
 |---|---|---|
@@ -156,12 +159,12 @@
 | `tests/test_kql_cli.py` | ۱۳ | قرارداد CLI و خطاها |
 | `tests/test_evaluation.py` | ۱۳ | rolling/کالیبراسیون/گزارش |
 | `tests/test_data.py` | ۱۲ | Binance، اعتبارسنجی، خطاهای شبکه |
-| `tests/test_portfolio.py` | ۱۱ | انتخاب، fill، time_range، failover |
+| `tests/test_portfolio.py` | ۱۱ | انتخاب، fill، time_range، شکست پیش‌بینی |
 | `tests/test_validation.py` | ۱۰ | ARI، جایگشت، بوت‌استرپ، آستانه خودکار |
 | `tests/test_kronos_adapter.py` | ۱۰ | آداپتور با مدل تصادفی کوچک (بیشتر skip در این محیط) |
 | `tests/test_engine_storage.py` | ۹ | SQLite، مهاجرت، immutability |
 | `tests/test_nobitex.py` | ۸ | URL/پنجره/خطا/retry/ذخیره timestamp بومی |
-| `tests/test_alpari.py` | ۸ | پارس CSV، تایم‌فریم، تقویم FX و افق سشن |
+| `tests/test_alpari.py` | ۱۳ | پارس CSV (UTF-16/cp1252/tab/`;`)، تایم‌فریم، تقویم FX و افق سشن |
 | `tests/test_cli.py` | ۸ | CLI پایه |
 | `tests/test_venues.py` | ۷ | فضای نام، تقویم، سالانه‌سازی، مسیردهی provider |
 | `tests/test_metrics.py` | ۵ | معیارهای عددی |
@@ -229,3 +232,4 @@ git -C vendor\Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 |---|---|
 | 2026-11-12 | ایجاد سند؛ به‌روزرسانی پس از افزودن Nobitex/Alpari و رسیدن تست‌ها به ۱۸۶ |
 | 2026-11-12 | افزودن جدول انطباق خواسته‌ها در [`REQUIREMENTS.md`](REQUIREMENTS.md) و ارجاع متقابل |
+| 2026-11-12 | بازبینی کد در برابر مستندات ([`AUDIT.md`](AUDIT.md))؛ رفع ۱۳ تناقض مستندات و ۴ ضعف کد، تست‌ها ۱۹۷ |

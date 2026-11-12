@@ -67,6 +67,45 @@ def test_wrong_timeframe_is_refused() -> None:
         alpari.read_mt5_csv(hourly, interval="1d")
 
 
+def test_utf16_export_with_bom_is_decoded(tmp_path) -> None:
+    """MT5's "Unicode" export is UTF-16; decoding it as cp1252 used to fail the DATE parse."""
+    path = tmp_path / "eurusd_utf16.csv"
+    path.write_bytes(mt5_csv().encode("utf-16"))  # includes a BOM
+    df, report = alpari.read_mt5_csv(path, interval="1d")
+    assert len(df) == 10 and report["encoding"] == "utf-16"
+    assert df["close"].iloc[0] == pytest.approx(1.1002)
+    assert report["volume_column"] == "tickvol"
+
+
+def test_utf16_export_without_bom_is_decoded(tmp_path) -> None:
+    path = tmp_path / "eurusd_utf16le.csv"
+    path.write_bytes(mt5_csv().encode("utf-16-le"))  # no BOM: NUL bytes give it away
+    df, report = alpari.read_mt5_csv(path, interval="1d")
+    assert len(df) == 10 and report["encoding"] == "utf-16-le"
+
+
+def test_cp1252_export_is_decoded(tmp_path) -> None:
+    path = tmp_path / "eurusd_ansi.csv"
+    path.write_bytes(mt5_csv(delimiter=";").encode("cp1252"))
+    df, report = alpari.read_mt5_csv(path, interval="1d")
+    # plain ASCII is valid UTF-8 as well, so either label is correct for this content
+    assert len(df) == 10 and report["encoding"] in ("utf-8", "cp1252")
+
+
+def test_decode_bytes_prefers_utf16_and_falls_back_to_cp1252() -> None:
+    assert alpari.decode_bytes("a\tb".encode("utf-16")) == ("a\tb", "utf-16")
+    assert alpari.decode_bytes("a\tb".encode("utf-16-le")) == ("a\tb", "utf-16-le")
+    assert alpari.decode_bytes(b"caf\xe9;1,5") == ("caf\u00e9;1,5", "cp1252")
+    assert alpari.decode_bytes(b"\xef\xbb\xbfdate") == ("date", "utf-8-sig")
+
+
+def test_single_row_export_reports_instead_of_crashing() -> None:
+    """One bar has no spacing to measure; the report must still be produced."""
+    single = "\n".join(mt5_csv(n=1).splitlines()) + "\n"
+    df, report = alpari.read_mt5_csv(single, interval="1d")
+    assert len(df) == 1 and report["median_spacing"] == "0 days 00:00:00"
+
+
 def test_looks_like_mt5() -> None:
     assert alpari.looks_like_mt5(mt5_csv())
     assert not alpari.looks_like_mt5("timestamp,open,high,low,close,volume,amount\n2024-01-01,1,1,1,1,1,1\n")
